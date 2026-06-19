@@ -1,0 +1,64 @@
+{
+    "name": "bitdreamit/laravel-mikopbx",
+    "description": "The most complete, professional & premium open-source Laravel package for MikoPBX & Asterisk — REST API, AMI, ARI, Auto Dialer, Campaign Manager, IVR Builder, Conference, Recording, Agent Panel, Real-time Events, Analytics & more.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "laravel", "mikopbx", "asterisk", "voip", "pbx",
+        "ami", "ari", "sip", "call-center", "autodialer",
+        "ivr", "campaign", "conference", "recording", "cdr"
+    ],
+    "homepage": "https://github.com/bitdreamit/laravel-mikopbx",
+    "support": {
+        "issues": "https://github.com/bitdreamit/laravel-mikopbx/issues",
+        "source": "https://github.com/bitdreamit/laravel-mikopbx"
+    },
+    "authors": [
+        {
+            "name": "BitDreamIT",
+            "email": "dev@bitdreamit.com",
+            "homepage": "https://bitdreamit.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "laravel/framework": "^11.0|^12.0",
+        "guzzlehttp/guzzle": "^7.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0",
+        "pestphp/pest": "^2.0",
+        "pestphp/pest-plugin-laravel": "^2.0",
+        "mockery/mockery": "^1.6",
+        "laravel/pint": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "BitDreamIT\\MikoPBX\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "BitDreamIT\\MikoPBX\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "BitDreamIT\\MikoPBX\\MikoPBXServiceProvider"
+            ],
+            "aliases": {
+                "MikoPBX": "BitDreamIT\\MikoPBX\\Facades\\MikoPBX"
+            }
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
