@@ -1,91 +1,75 @@
 <?php
-
 namespace BitDreamIT\MikoPBX\Services;
+use BitDreamIT\MikoPBX\Models\HealthLog;
 
-use Illuminate\Support\Facades\Log;
-
-/**
- * Health Check Service
- * Monitor MikoPBX system health, SIP trunk status, and AMI connectivity.
- */
 class HealthCheckService
 {
     public function __construct(
         private RestApiService $api,
-        private AMIService     $ami,
+        private AMIService $ami
     ) {}
 
-    /** Full system health check */
     public function check(): array
     {
-        $results = [
-            'timestamp'   => now()->toISOString(),
-            'overall'     => 'healthy',
-            'checks'      => [],
-        ];
+        $amiOk  = false;
+        $ariOk  = false;
+        $sipOk  = false;
+        $calls  = 0;
+        $online = 0;
 
-        // REST API check
         try {
-            $version = $this->api->getVersion();
-            $results['checks']['rest_api'] = ['status' => 'ok', 'version' => $version['data'] ?? 'unknown'];
-        } catch (\Throwable $e) {
-            $results['checks']['rest_api'] = ['status' => 'error', 'message' => $e->getMessage()];
-            $results['overall'] = 'degraded';
-        }
+            if ($this->ami->connect()) {
+                $amiOk = true;
+                $this->ami->disconnect();
+            }
+        } catch (\Throwable) {}
 
-        // AMI check
         try {
-            $ping = $this->ami->connect()->ping();
-            $results['checks']['ami'] = ['status' => $ping ? 'ok' : 'error'];
-            $this->ami->disconnect();
-        } catch (\Throwable $e) {
-            $results['checks']['ami'] = ['status' => 'error', 'message' => $e->getMessage()];
-            $results['overall'] = 'degraded';
-        }
+            $info = $this->api->getSystemInfo();
+            $ariOk = isset($info['data']);
+        } catch (\Throwable) {}
 
-        // Active calls check
         try {
-            $calls = $this->api->getActiveCalls();
-            $results['checks']['active_calls'] = ['status' => 'ok', 'count' => count($calls['data'] ?? [])];
-        } catch (\Throwable $e) {
-            $results['checks']['active_calls'] = ['status' => 'error', 'message' => $e->getMessage()];
-        }
+            $trunk = $this->api->getTrunkStatus();
+            $sipOk = collect($trunk['data'] ?? [])->contains(fn($t) => ($t['state'] ?? '') === 'Registered');
+        } catch (\Throwable) {}
 
-        // Extension status check
         try {
-            $exts   = $this->api->getExtensionStatuses();
-            $online = collect($exts['data'] ?? [])->where('status', 'REGISTERED')->count();
-            $total  = count($exts['data'] ?? []);
-            $results['checks']['extensions'] = ['status' => 'ok', 'online' => $online, 'total' => $total];
-        } catch (\Throwable $e) {
-            $results['checks']['extensions'] = ['status' => 'error', 'message' => $e->getMessage()];
-        }
+            $active = $this->api->getActiveCalls();
+            $calls  = count($active['data'] ?? []);
+        } catch (\Throwable) {}
 
-        // Mark unhealthy if all critical checks fail
-        $failed = collect($results['checks'])->where('status', 'error')->count();
-        if ($failed >= 2) $results['overall'] = 'unhealthy';
+        $status = match(true) {
+            ! $amiOk && ! $ariOk => 'critical',
+            ! $sipOk             => 'degraded',
+            default              => 'healthy',
+        };
 
-        return $results;
+        $result = compact('amiOk', 'ariOk', 'sipOk', 'calls', 'online', 'status');
+
+        HealthLog::create([
+            'status'             => $status,
+            'ami_connected'      => $amiOk,
+            'ari_connected'      => $ariOk,
+            'sip_trunk_up'       => $sipOk,
+            'active_calls'       => $calls,
+            'extensions_online'  => $online,
+            'details'            => $result,
+            'checked_at'         => now(),
+        ]);
+
+        return $result;
     }
 
-    /** Quick ping — is MikoPBX reachable? */
-    public function ping(): bool
+    public function latest(): ?HealthLog
     {
-        try {
-            $this->api->getVersion();
-            return true;
-        } catch (\Throwable) {
-            return false;
-        }
+        return HealthLog::latest('checked_at')->first();
     }
 
-    /** Get system resource usage */
-    public function systemInfo(): array
+    public function history(int $hours = 24): \Illuminate\Database\Eloquent\Collection
     {
-        try {
-            return $this->api->getSystemStatus();
-        } catch (\Throwable $e) {
-            return ['error' => $e->getMessage()];
-        }
+        return HealthLog::where('checked_at', '>=', now()->subHours($hours))
+            ->orderBy('checked_at')
+            ->get();
     }
 }

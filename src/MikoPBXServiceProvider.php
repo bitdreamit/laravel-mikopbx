@@ -4,48 +4,145 @@ namespace BitDreamIT\MikoPBX;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
-use BitDreamIT\MikoPBX\Services\{AMIService,ARIService,RestApiService,CampaignService,AgentService,RecordingService,ConferenceService,BlacklistService,AnalyticsService,SmsNotificationService,CallbackService,HealthCheckService};
-use BitDreamIT\MikoPBX\Commands\{AmiListenCommand,CampaignRunCommand,InstallCommand,SyncExtensionsCommand,HealthCheckCommand,CdrSyncCommand};
+use BitDreamIT\MikoPBX\Services\AMIService;
+use BitDreamIT\MikoPBX\Services\RestApiService;
+use BitDreamIT\MikoPBX\Services\ARIService;
+use BitDreamIT\MikoPBX\Services\CampaignService;
+use BitDreamIT\MikoPBX\Services\AgentService;
+use BitDreamIT\MikoPBX\Services\RecordingService;
+use BitDreamIT\MikoPBX\Services\BlacklistService;
+use BitDreamIT\MikoPBX\Services\CallbackService;
+use BitDreamIT\MikoPBX\Services\ConferenceService;
+use BitDreamIT\MikoPBX\Services\IVRService;
+use BitDreamIT\MikoPBX\Services\AnalyticsService;
+use BitDreamIT\MikoPBX\Services\HealthCheckService;
+use BitDreamIT\MikoPBX\Services\SmsService;
+use BitDreamIT\MikoPBX\Services\WebDialerService;
 
 class MikoPBXServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/mikopbx.php', 'mikopbx');
-        $this->app->singleton(RestApiService::class,      fn($a) => new RestApiService($a['config']['mikopbx']));
-        $this->app->singleton(AMIService::class,          fn($a) => new AMIService($a['config']['mikopbx']));
-        $this->app->singleton(ARIService::class,          fn($a) => new ARIService($a['config']['mikopbx']));
-        $this->app->singleton(CampaignService::class,     fn($a) => new CampaignService($a->make(RestApiService::class)));
-        $this->app->singleton(AgentService::class,        fn($a) => new AgentService($a->make(RestApiService::class), $a->make(AMIService::class)));
-        $this->app->singleton(RecordingService::class,    fn($a) => new RecordingService($a->make(RestApiService::class), $a->make(ARIService::class), $a['config']['mikopbx']));
-        $this->app->singleton(ConferenceService::class,   fn($a) => new ConferenceService($a->make(ARIService::class)));
-        $this->app->singleton(BlacklistService::class,    fn($a) => new BlacklistService());
-        $this->app->singleton(AnalyticsService::class,    fn($a) => new AnalyticsService($a->make(RestApiService::class)));
-        $this->app->singleton(SmsNotificationService::class, fn($a) => new SmsNotificationService($a['config']['mikopbx']));
-        $this->app->singleton(CallbackService::class,     fn($a) => new CallbackService($a->make(RestApiService::class), $a->make(AMIService::class)));
-        $this->app->singleton(HealthCheckService::class,  fn($a) => new HealthCheckService($a->make(RestApiService::class), $a->make(AMIService::class)));
-        $this->app->singleton('mikopbx', fn($a) => new MikoPBXManager(
-            $a->make(RestApiService::class), $a->make(AMIService::class), $a->make(ARIService::class),
-            $a->make(CampaignService::class), $a->make(AgentService::class), $a->make(RecordingService::class),
-            $a->make(ConferenceService::class), $a->make(BlacklistService::class), $a->make(AnalyticsService::class),
-            $a->make(CallbackService::class), $a->make(HealthCheckService::class),
-        ));
+        $this->mergeConfigFrom(__DIR__.'/../config/mikopbx.php', 'mikopbx');
+
+        // Register MikoPBXManager as singleton facade target
+        $this->app->singleton('mikopbx', fn($app) => new MikoPBXManager($app));
+
+        // Bind each service
+        foreach ([
+            AMIService::class, RestApiService::class, ARIService::class,
+            CampaignService::class, AgentService::class, RecordingService::class,
+            BlacklistService::class, CallbackService::class, ConferenceService::class,
+            IVRService::class, AnalyticsService::class, HealthCheckService::class,
+            SmsService::class, WebDialerService::class,
+        ] as $service) {
+            $this->app->singleton($service);
+        }
     }
 
     public function boot(): void
     {
-        $this->publishes([__DIR__ . '/../config/mikopbx.php'  => config_path('mikopbx.php')],   'mikopbx-config');
-        $this->publishes([__DIR__ . '/../database/migrations' => database_path('migrations')],   'mikopbx-migrations');
-        $this->publishes([__DIR__ . '/../resources/views'     => resource_path('views/vendor/mikopbx')], 'mikopbx-views');
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
-        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'mikopbx');
-        if (config('mikopbx.routes.enabled', true)) {
-            Route::middleware(config('mikopbx.routes.middleware', ['api']))
-                ->prefix(config('mikopbx.routes.prefix', 'mikopbx'))
-                ->group(__DIR__ . '/../routes/api.php');
+        $this->registerPublishing();
+        $this->registerRoutes();
+        $this->registerViews();
+        $this->registerCommands();
+        $this->registerMigrations();
+
+        // Register Livewire components if Livewire is installed
+        if (class_exists(\Livewire\Livewire::class)) {
+            $this->registerLivewireComponents();
         }
-        if ($this->app->runningInConsole()) {
-            $this->commands([AmiListenCommand::class, CampaignRunCommand::class, InstallCommand::class, SyncExtensionsCommand::class, HealthCheckCommand::class, CdrSyncCommand::class]);
+    }
+
+    protected function registerPublishing(): void
+    {
+        if (! $this->app->runningInConsole()) return;
+
+        $this->publishes([
+            __DIR__.'/../config/mikopbx.php' => config_path('mikopbx.php'),
+        ], 'mikopbx-config');
+
+        $this->publishes([
+            __DIR__.'/../database/migrations' => database_path('migrations'),
+        ], 'mikopbx-migrations');
+
+        $this->publishes([
+            __DIR__.'/../resources/views' => resource_path('views/vendor/mikopbx'),
+        ], 'mikopbx-views');
+
+        $this->publishes([
+            __DIR__.'/../resources/js'  => resource_path('js/mikopbx'),
+            __DIR__.'/../resources/css' => resource_path('css/mikopbx'),
+        ], 'mikopbx-assets');
+    }
+
+    protected function registerRoutes(): void
+    {
+        if (! $this->app['config']->get('mikopbx.route_prefix')) return;
+
+        Route::group([
+            'prefix'     => config('mikopbx.route_prefix', 'pbx'),
+            'middleware' => config('mikopbx.route_middleware', ['web', 'auth']),
+            'as'         => 'mikopbx.',
+        ], function () {
+            $this->loadRoutesFrom(__DIR__.'/../routes/web.php');
+        });
+
+        Route::group([
+            'prefix'     => 'api/'.config('mikopbx.route_prefix', 'pbx'),
+            'middleware' => config('mikopbx.route_middleware', ['web', 'auth']),
+            'as'         => 'mikopbx.api.',
+        ], function () {
+            $this->loadRoutesFrom(__DIR__.'/../routes/api.php');
+        });
+
+        // Webhook — no auth (secured by secret token)
+        Route::group(['prefix' => 'mikopbx-webhook', 'middleware' => ['api']], function () {
+            $this->loadRoutesFrom(__DIR__.'/../routes/webhook.php');
+        });
+    }
+
+    protected function registerViews(): void
+    {
+        $this->loadViewsFrom(__DIR__.'/../resources/views', 'mikopbx');
+    }
+
+    protected function registerMigrations(): void
+    {
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+    }
+
+    protected function registerCommands(): void
+    {
+        if (! $this->app->runningInConsole()) return;
+
+        $this->commands([
+            \BitDreamIT\MikoPBX\Commands\InstallCommand::class,
+            \BitDreamIT\MikoPBX\Commands\AmiListenCommand::class,
+            \BitDreamIT\MikoPBX\Commands\CdrSyncCommand::class,
+            \BitDreamIT\MikoPBX\Commands\SyncExtensionsCommand::class,
+            \BitDreamIT\MikoPBX\Commands\CampaignRunCommand::class,
+            \BitDreamIT\MikoPBX\Commands\HealthCheckCommand::class,
+        ]);
+    }
+
+    protected function registerLivewireComponents(): void
+    {
+        $components = [
+            'mikopbx-live-call-board'    => \BitDreamIT\MikoPBX\Livewire\LiveCallBoard::class,
+            'mikopbx-agent-status-grid'  => \BitDreamIT\MikoPBX\Livewire\AgentStatusGrid::class,
+            'mikopbx-campaign-manager'   => \BitDreamIT\MikoPBX\Livewire\CampaignManager::class,
+            'mikopbx-call-log-table'     => \BitDreamIT\MikoPBX\Livewire\CallLogTable::class,
+            'mikopbx-blacklist-manager'  => \BitDreamIT\MikoPBX\Livewire\BlacklistManager::class,
+            'mikopbx-pending-callbacks'  => \BitDreamIT\MikoPBX\Livewire\PendingCallbacks::class,
+            'mikopbx-incoming-popup'     => \BitDreamIT\MikoPBX\Livewire\IncomingCallPopup::class,
+            'mikopbx-ivr-builder'        => \BitDreamIT\MikoPBX\Livewire\IVRBuilderComponent::class,
+            'mikopbx-analytics-dash'     => \BitDreamIT\MikoPBX\Livewire\AnalyticsDashboard::class,
+            'mikopbx-health-monitor'     => \BitDreamIT\MikoPBX\Livewire\HealthMonitor::class,
+        ];
+
+        foreach ($components as $alias => $class) {
+            \Livewire\Livewire::component($alias, $class);
         }
     }
 }

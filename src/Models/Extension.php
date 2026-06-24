@@ -3,29 +3,47 @@
 namespace BitDreamIT\MikoPBX\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Extension extends Model
 {
-    protected $table = 'mikopbx_extensions';
-
-    protected $fillable = [
-        'number', 'name', 'email',
-        'sip_peer', 'department', 'online',
-        'status', 'last_seen_at',
-    ];
-
+    protected $guarded = [];
     protected $casts = [
-        'online'       => 'boolean',
         'last_seen_at' => 'datetime',
+        'meta'         => 'array',
     ];
 
-    public function callLogs(): HasMany
+    public function getTable(): string
     {
-        return $this->hasMany(CallLog::class, 'extension', 'number');
+        return config('mikopbx.table_prefix', 'mikopbx_') . 'extensions';
     }
 
-    public function scopeOnline(Builder $q): Builder  { return $q->where('online', true); }
-    public function scopeOffline(Builder $q): Builder { return $q->where('online', false); }
+    public function callLogs()  { return $this->hasMany(CallLog::class, 'extension', 'extension'); }
+    public function callbacks() { return $this->hasMany(Callback::class, 'assigned_to'); }
+
+    public function getIsOnlineAttribute(): bool
+    {
+        return in_array($this->status, ['online', 'busy']);
+    }
+
+    public function getStatusColorAttribute(): string
+    {
+        return match($this->status) {
+            'online'  => 'green',
+            'busy'    => 'orange',
+            'dnd'     => 'red',
+            'away'    => 'yellow',
+            default   => 'gray',
+        };
+    }
+
+    public function getStatusDotAttribute(): string
+    {
+        return match($this->status) {
+            'online'  => 'bg-green-400',
+            'busy'    => 'bg-orange-400',
+            'dnd'     => 'bg-red-400',
+            'away'    => 'bg-yellow-400',
+            default   => 'bg-gray-300',
+        };
+    }
 }

@@ -3,25 +3,35 @@
 namespace BitDreamIT\MikoPBX\Commands;
 
 use Illuminate\Console\Command;
-use BitDreamIT\MikoPBX\Facades\MikoPBX;
+use BitDreamIT\MikoPBX\Services\HealthCheckService;
 
 class HealthCheckCommand extends Command
 {
     protected $signature   = 'mikopbx:health';
-    protected $description = 'Run a full health check on MikoPBX system';
+    protected $description = 'Run a health check against MikoPBX and log result';
 
-    public function handle(): int
+    public function handle(HealthCheckService $health): int
     {
         $this->info('Running MikoPBX health check...');
-        $this->newLine();
-        $health = MikoPBX::health()->check();
-        $this->line('Overall: ' . strtoupper($health['overall']));
-        $this->newLine();
-        $rows = [];
-        foreach ($health['checks'] as $name => $result) {
-            $rows[] = [str_replace('_', ' ', ucfirst($name)), $result['status'], implode(', ', array_filter(array_map(fn($k,$v) => $k !== 'status' ? "$k: $v" : null, array_keys($result), $result)))];
-        }
-        $this->table(['Check', 'Status', 'Detail'], $rows);
-        return $health['overall'] === 'unhealthy' ? self::FAILURE : self::SUCCESS;
+        $result = $health->check();
+
+        $this->table(
+            ['Component', 'Status'],
+            [
+                ['AMI',         $result['amiOk']  ? '✅ Connected' : '❌ Down'],
+                ['ARI',         $result['ariOk']  ? '✅ Connected' : '❌ Down'],
+                ['SIP Trunk',   $result['sipOk']  ? '✅ Registered' : '⚠️ Not registered'],
+                ['Active Calls', $result['calls']],
+            ]
+        );
+
+        $statusColor = match($result['status']) {
+            'healthy'  => 'info',
+            'degraded' => 'warn',
+            default    => 'error',
+        };
+        $this->$statusColor("Overall: {$result['status']}");
+
+        return $result['status'] === 'critical' ? 1 : 0;
     }
 }

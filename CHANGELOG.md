@@ -1,139 +1,105 @@
 # Changelog
 
-All notable changes to `bitdreamit/laravel-mikopbx` are documented here.
+All notable changes to `bitdreamit/laravel-mikopbx` will be documented in this file.
+
+## [1.0.0] — 2026-06-24
+
+### Added — Initial Release 🎉
+
+#### Core Infrastructure
+- `MikoPBXServiceProvider` — auto-discovers via Laravel's package discovery
+- `MikoPBXManager` — central facade target with 14 named service accessors
+- `MikoPBX` facade with full PHPDoc for IDE autocomplete
+- `MikoPBXException` for typed error handling
+- Single migration creating 10 prefixed tables (`mikopbx_*`)
+
+#### Services (14)
+- **RestApiService** — 30+ MikoPBX REST v3 endpoints (calls, extensions, CDR, campaigns, IVR, conference, system)
+- **AMIService** — raw TCP socket AMI with connect/listen/originate/redirect/hangup/mute/queue
+- **ARIService** — ARI REST + WebSocket URL builder
+- **CampaignService** — create, start, pause, stop, syncProgress, parseNumbersFromFile, getStats
+- **AgentService** — all(), sync(), setStatus(), getOnlineCount(), getAvailableAgents()
+- **AnalyticsService** — summary, dailyTrend, peakHours, agentPerformance, callsByStatus
+- **BlacklistService** — add, remove, isBlocked (with expiry), all
+- **CallbackService** — schedule, scheduleFromMissedCall, attempt, pending
+- **RecordingService** — list, proxyStream, getSignedUrl
+- **ConferenceService** — getRooms, kickParticipant, muteParticipant
+- **IVRService** — getMenus, save, buildTree
+- **HealthCheckService** — check (AMI+ARI+SIP), latest, history
+- **SmsService** — SSL Wireless + Twilio drivers, feature-gated
+- **WebDialerService** — SIP.js config builder, ws:// URL generator
+
+#### Eloquent Models (7)
+- `CallLog` — with scopes (inbound/outbound/answered/missed/today), `duration_formatted` accessor
+- `Campaign` — `progress`, `isRunning()`, `isDone()`, `status_badge` accessors
+- `CampaignNumber` — tracks per-number dialing status and DTMF responses
+- `Extension` — `is_online`, `status_color`, `status_dot` accessors
+- `Blacklist` — expiry-aware
+- `Callback` — priority badge, scheduled/attempted/completed timestamps
+- `HealthLog` — stores AMI/ARI/SIP status per check
+
+#### HTTP Controllers (12)
+- Dashboard, Call, Campaign, Agent, Analytics, Recording, Blacklist, Callback, Conference, IVR, Health, WebDialer
+
+#### Livewire v3 Components (10)
+- `LiveCallBoard` — polls activeCalls, transfer modal, hangup, real-time Echo
+- `AgentStatusGrid` — agent dots, click-to-call, Echo listener
+- `CampaignManager` — start/pause/stop, live progress, polls every 8s
+- `CallLogTable` — paginated with search/filter/date, Echo listener for live updates
+- `BlacklistManager` — add/remove with search
+- `PendingCallbacks` — attempt, cancel, priority-sorted, polls every 15s
+- `IncomingCallPopup` — answer/reject/log, ringtone events, Echo-driven
+- `AnalyticsDashboard` — Chart.js daily trend + peak hours + status doughnut + agent table
+- `HealthMonitor` — run check, status banner, config summary, polls every 60s
+- `IVRBuilderComponent` — visual node/key builder, preview pane, save to MikoPBX
+
+#### Blade Views (19)
+- `layouts/app.blade.php` — full sidebar, web dialer panel, quick-dial, agent status, toast system
+- All 14 pages + 5 Livewire blade partials
+
+#### Artisan Commands (6)
+- `mikopbx:install` — publish, migrate, Supervisor config, .env example
+- `mikopbx:listen` — AMI daemon with event dispatch (Newchannel/Bridge/Hangup/PeerStatus)
+- `mikopbx:cdr-sync --days=N` — pull CDR from MikoPBX REST API
+- `mikopbx:sync-extensions` — upsert extensions from MikoPBX
+- `mikopbx:campaign-run [--sync]` — start scheduled / sync running campaigns
+- `mikopbx:health` — run health check, exit code 1 on critical
+
+#### Events (4, all ShouldBroadcast)
+- `IncomingCallEvent` → channel `mikopbx.calls`, event `.incoming`
+- `CallAnsweredEvent` → channel `mikopbx.calls`, event `.answered`
+- `CallEndedEvent` → channel `mikopbx.calls`, event `.ended`
+- `AgentStatusChangedEvent` → channel `mikopbx.agents`, event `.status`
+
+#### Jobs & Listeners
+- `ProcessCallbackJob` — schedules callback + optional SMS on missed call
+- `MissedCallListener` — handles `CallEndedEvent` for missed status
+
+#### Enums (3)
+- `CallStatus` — with `label()`, `color()`, `badgeClass()`
+- `CampaignStatus` — with `isActive()`, `canStart()`, `badgeClass()`
+- `AgentStatus` — with `dot()`, `isAvailable()`
+
+#### Traits
+- `HasMikoPBXExtension` — add to User model for `callNumber()`, `callLogs()`, `pendingCallbacks()`
+
+#### Testing
+- `MikoPBXFake` — full test double replacing `MikoPBXManager` in service container
+- Assertions: `assertOriginated`, `assertNotOriginated`, `assertOriginateCount`, `assertTransferred`, `assertHungUp`, `assertNothingOriginated`, `assertCampaignStarted`
+- `FakeRestApiService` — all API calls stubbed, no HTTP made during tests
+- 20+ Feature tests + 25+ Unit tests using Pest v3
+
+#### Frontend Assets
+- `resources/js/mikopbx/app.js` — ringtone management, Echo init, global `window.mikopbxDial()`
+- `resources/js/mikopbx/echo-listeners.js` — channel subscriptions, browser notifications
+- `resources/js/mikopbx/click-to-call.js` — Alpine.js component + `[data-pbx-call]` auto-wiring
+- `resources/css/mikopbx.css` — pulse animation, waveform bars, status dots, progress shimmer
+
+#### Routes
+- `routes/web.php` — 25 named routes under configurable prefix (default: `/pbx`)
+- `routes/api.php` — JSON API routes under `/api/pbx`
+- `routes/webhook.php` — unauthenticated webhook receiver for MikoPBX events
 
 ---
 
-## [1.0.0] — 2026-06-18 — Initial Release
-
-### Added
-
-**Core**
-- `MikoPBXServiceProvider` — auto-discovery, publishes config/migrations/views
-- `MikoPBXManager` — single entry point via `MikoPBX::` facade
-- `MikoPBX` facade with full IDE type hints via PHPDoc
-
-**Services**
-- `RestApiService` — full MikoPBX REST API v3 client (calls, recordings, campaigns, extensions, CDR)
-- `AMIService` — complete Asterisk Manager Interface (originate, transfer, hangup, mute, hold, park, queue, voicemail, conference, AstDB, monitoring, system commands)
-- `ARIService` — Asterisk REST Interface (channels, bridges, recordings, playbacks, sounds, endpoints)
-- `CampaignService` — auto dialer (broadcast, IVR survey, predictive), campaign CRUD + start/stop/status
-- `AgentService` — agent status, click-to-call, transfer, active calls, online/offline
-- `RecordingService` — list, download, live recording start/stop/pause/resume, stats
-- `ConferenceService` — ARI bridge management, dial-in, mute, kick, record
-- `IVRBuilder` — fluent IVR builder with presets (salesSupportTemplate, surveyTemplate)
-- `BlacklistService` — block/unblock numbers, expiry, auto-cleanup
-- `CallbackService` — schedule/execute/cancel missed call callbacks
-- `AnalyticsService` — KPI dashboard, peak hours, agent performance, SLA compliance, abandoned calls, CDR export
-- `SmsNotificationService` — Twilio, Vonage, SSL Wireless BD, custom gateway drivers
-- `HealthCheckService` — full REST + AMI + extensions + active calls health check
-
-**Events (all ShouldBroadcast)**
-- `IncomingCallEvent`
-- `CallAnsweredEvent`
-- `CallEndedEvent`
-- `CallMissedEvent`
-- `CallTransferredEvent`
-- `AgentStatusChangedEvent`
-- `CallerJoinedQueueEvent`
-- `CallerLeftQueueEvent`
-- `CampaignStartedEvent`
-- `CampaignCompletedEvent`
-- `ConferenceParticipantJoinedEvent`
-- `NewVoicemailEvent`
-- `CallRecordedEvent`
-
-**Listeners**
-- `HandleIncomingCall`
-- `HandleCallEnded`
-- `HandleMissedCall` — auto-schedules callback, SMS alert, notification
-- `HandleCampaignCompleted` — notifies manager, generates report
-- `HandleNewVoicemail` — notifies agent via mail + SMS
-
-**Notifications**
-- `MissedCallNotification` — mail, Slack, database
-- `VoicemailNotification` — mail, database
-- `CampaignCompletedNotification` — mail, database
-- `CallbackReminderNotification` — mail, database
-
-**Jobs**
-- `ProcessCallbackJob` — retry-safe callback execution
-- `SyncExtensionsJob` — sync extension statuses
-- `GenerateCampaignReportJob` — generate JSON report after campaign
-- `CleanOldCallLogsJob` — purge old CDR records
-- `MikoPBXHealthAlertJob` — alert on health degradation
-- `CdrDailySyncJob` — daily CDR sync from MikoPBX
-- `BlacklistCleanupJob` — clean expired blacklist entries
-
-**HTTP**
-- 40+ REST API endpoints
-- `CallController`, `CampaignController`, `AgentController`, `RecordingController`
-- `ConferenceController`, `IVRController`, `SystemController`
-- `AnalyticsController`, `BlacklistController`, `CallbackController`, `HealthController`
-- `WebhookController` — HMAC-verified webhook receiver
-- Form Request validation classes for all endpoints
-- JSON Resource classes with proper formatting
-
-**Middleware**
-- `CheckBlacklist` — auto-reject blacklisted numbers
-- `VerifyWebhookSignature` — HMAC webhook verification
-- `MikoPBXApiAuth` — API key authentication
-- `LogCallActivity` — request/response logging
-
-**Models**
-- `CallLog` — full call detail record with scopes
-- `Extension` — agent/extension with online status
-- `Campaign` — campaign with progress tracking
-- `CampaignNumber` — per-number status tracking
-- `Blacklist` — blocked numbers with expiry
-- `CallbackRequest` — callback scheduling with retry
-- `Conference` — conference bridge tracking
-- `CdrSync` — raw CDR sync storage
-- `IVRMenu` — IVR menu persistence
-
-**DTOs**
-- `CallDTO` — immutable call data object
-- `OriginateDTO` — call origination parameters (fluent)
-- `CampaignDTO` — campaign creation parameters
-- `AgentDTO` — agent data object
-
-**Enums**
-- `CallStatus` — ringing, answered, ended, missed, busy, failed
-- `CallDirection` — inbound, outbound, internal
-- `HangupCause` — all Asterisk hangup causes with helpers
-- `AgentStatus` — registered, unreachable, inuse, ringing
-
-**Traits**
-- `HasCallLogs` — add to any Eloquent model for call history + click-to-call
-- `FormatsCallDuration` — human-readable duration formatting
-- `ValidatesPhoneNumber` — BD phone number normalization + validation
-
-**Contracts (Interfaces)**
-- `CallServiceContract`
-- `AMIServiceContract`
-- `CampaignServiceContract`
-- `AgentServiceContract`
-- `AnalyticsServiceContract`
-- `BlacklistServiceContract`
-
-**Artisan Commands**
-- `mikopbx:install` — publish config + migrations
-- `mikopbx:listen` — AMI real-time event listener (Supervisor-ready, auto-reconnect)
-- `mikopbx:health` — full health check
-- `mikopbx:sync-extensions` — sync extension statuses
-- `mikopbx:cdr-sync` — CDR sync with date range
-- `mikopbx:campaign` — start/stop/status campaigns from CLI
-
-**Scheduler**
-- `MikoPBXScheduler::register($schedule)` — all scheduled jobs pre-configured
-
-**Testing**
-- `MikoPBXFake` — simulate events, assert calls, factories
-- `TestCase` — Orchestra Testbench base for package testing
-- Feature tests — call logs, blacklist, callbacks, analytics, IVR
-- Unit tests — IVRBuilder, Enums, DTOs, Traits
-
-**Documentation**
-- `README.md` — complete usage guide with all examples
-- `CHANGELOG.md`
-- `docs/supervisor-mikopbx-ami.conf` — production Supervisor config
+*Built by [BitDream IT](https://bitdreamit.com), Bangladesh — the complete open-source Laravel call center package.*

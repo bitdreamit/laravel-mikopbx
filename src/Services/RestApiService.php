@@ -2,9 +2,8 @@
 
 namespace BitDreamIT\MikoPBX\Services;
 
-use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Http\Client\PendingRequest;
 use BitDreamIT\MikoPBX\Exceptions\MikoPBXException;
 
 class RestApiService
@@ -12,17 +11,13 @@ class RestApiService
     private string $baseUrl;
     private string $apiKey;
 
-    public function __construct(array $config)
+    public function __construct()
     {
-        $this->baseUrl = rtrim($config['url'], '/');
-        $this->apiKey  = $config['api_key'];
+        $this->baseUrl = rtrim(config('mikopbx.url', ''), '/');
+        $this->apiKey  = config('mikopbx.api_key', '');
     }
 
-    // ─────────────────────────────────────────
-    // HTTP CLIENT
-    // ─────────────────────────────────────────
-
-    private function http(): \Illuminate\Http\Client\PendingRequest
+    private function http(): PendingRequest
     {
         return Http::withHeaders([
             'X-Auth-Token' => $this->apiKey,
@@ -30,177 +25,204 @@ class RestApiService
             'Accept'       => 'application/json',
         ])
         ->withoutVerifying()
-        ->timeout(30);
+        ->timeout(config('mikopbx.timeout', 10));
     }
 
-    private function handleResponse(Response $response, string $action): array
+    private function get(string $path, array $params = []): array
     {
-        if ($response->failed()) {
-            Log::error("MikoPBX API error [$action]", [
-                'status' => $response->status(),
-                'body'   => $response->body(),
-            ]);
-            throw new MikoPBXException("MikoPBX API error [$action]: " . $response->status());
-        }
-        return $response->json() ?? [];
+        $r = $this->http()->get("{$this->baseUrl}{$path}", $params);
+        if ($r->failed()) throw new MikoPBXException("MikoPBX API error [{$r->status()}] GET {$path}");
+        return $r->json() ?? [];
     }
 
-    // ─────────────────────────────────────────
-    // SYSTEM
-    // ─────────────────────────────────────────
-
-    public function getVersion(): array
+    private function post(string $path, array $data = []): array
     {
-        return $this->handleResponse(
-            $this->http()->get("{$this->baseUrl}/pbxcore/api/system/getPbxVersion"),
-            'getVersion'
-        );
+        $r = $this->http()->post("{$this->baseUrl}{$path}", $data);
+        if ($r->failed()) throw new MikoPBXException("MikoPBX API error [{$r->status()}] POST {$path}");
+        return $r->json() ?? [];
     }
 
-    public function getSystemStatus(): array
+    // ── Calls ────────────────────────────────────────────────────────────────
+
+    /** Originate an outbound call from extension to number */
+    public function originate(string $from, string $to, array $opts = []): array
     {
-        return $this->handleResponse(
-            $this->http()->get("{$this->baseUrl}/pbxcore/api/system/getInfo"),
-            'getSystemStatus'
-        );
+        return $this->post('/pbxcore/api/sip/originate', array_merge([
+            'from' => $from,
+            'to'   => $to,
+        ], $opts));
     }
 
-    // ─────────────────────────────────────────
-    // CALLS
-    // ─────────────────────────────────────────
-
-    public function originate(string $from, string $to): array
+    /** Transfer active channel to extension */
+    public function transfer(string $channel, string $to, string $context = 'from-internal'): array
     {
-        return $this->handleResponse(
-            $this->http()->post("{$this->baseUrl}/pbxcore/api/sip/originate", [
-                'from' => $from,
-                'to'   => $to,
-            ]),
-            'originate'
-        );
+        return $this->post('/pbxcore/api/sip/transfer', [
+            'channel' => $channel,
+            'to'      => $to,
+            'context' => $context,
+        ]);
     }
 
-    public function transfer(string $channel, string $extension): array
-    {
-        return $this->handleResponse(
-            $this->http()->post("{$this->baseUrl}/pbxcore/api/sip/transfer", [
-                'channel' => $channel,
-                'to'      => $extension,
-            ]),
-            'transfer'
-        );
-    }
-
+    /** Hangup a channel */
     public function hangup(string $channel): array
     {
-        return $this->handleResponse(
-            $this->http()->post("{$this->baseUrl}/pbxcore/api/sip/hangup", [
-                'channel' => $channel,
-            ]),
-            'hangup'
-        );
+        return $this->post('/pbxcore/api/sip/hangup', ['channel' => $channel]);
     }
 
+    /** Mute/unmute a channel */
+    public function mute(string $channel, bool $mute = true): array
+    {
+        return $this->post('/pbxcore/api/sip/mute', ['channel' => $channel, 'mute' => $mute]);
+    }
+
+    /** Get all active calls right now */
     public function getActiveCalls(): array
     {
-        return $this->handleResponse(
-            $this->http()->get("{$this->baseUrl}/pbxcore/api/cdr/getActiveCalls"),
-            'getActiveCalls'
-        );
+        return $this->get('/pbxcore/api/cdr/getActiveCalls');
+    }
+
+    /** Get CDR records */
+    public function getCDR(string $from, string $to, array $filters = []): array
+    {
+        return $this->get('/pbxcore/api/cdr/getRecords', array_merge([
+            'dateFrom' => $from,
+            'dateTo'   => $to,
+        ], $filters));
+    }
+
+    // ── Extensions ───────────────────────────────────────────────────────────
+
+    public function getExtensions(): array
+    {
+        return $this->get('/pbxcore/api/extensions/getForSelect');
     }
 
     public function getExtensionStatuses(): array
     {
-        return $this->handleResponse(
-            $this->http()->get("{$this->baseUrl}/pbxcore/api/sip/getPeerStatuses"),
-            'getExtensionStatuses'
-        );
+        return $this->get('/pbxcore/api/sip/getPeerStatuses');
     }
 
-    // ─────────────────────────────────────────
-    // RECORDINGS
-    // ─────────────────────────────────────────
-
-    public function getRecordings(string $dateFrom, string $dateTo, ?string $extension = null): array
+    public function createExtension(array $data): array
     {
-        $params = ['dateFrom' => $dateFrom, 'dateTo' => $dateTo];
-        if ($extension) $params['number'] = $extension;
+        return $this->post('/pbxcore/api/extensions/saveRecord', $data);
+    }
 
-        return $this->handleResponse(
-            $this->http()->get("{$this->baseUrl}/pbxcore/api/cdr/getRecords", $params),
-            'getRecordings'
-        );
+    public function deleteExtension(string $id): array
+    {
+        return $this->post('/pbxcore/api/extensions/deleteRecord', ['id' => $id]);
+    }
+
+    // ── SIP Trunks ───────────────────────────────────────────────────────────
+
+    public function getTrunks(): array
+    {
+        return $this->get('/pbxcore/api/providers/getPbxSettings');
+    }
+
+    public function getTrunkStatus(): array
+    {
+        return $this->get('/pbxcore/api/sip/getRegistry');
+    }
+
+    // ── Recordings ───────────────────────────────────────────────────────────
+
+    public function getRecordings(string $from, string $to, string $number = ''): array
+    {
+        return $this->get('/pbxcore/api/cdr/getRecords', [
+            'dateFrom' => $from,
+            'dateTo'   => $to,
+            'number'   => $number,
+        ]);
     }
 
     public function getRecordingUrl(string $filename): string
     {
-        return "{$this->baseUrl}/pbxcore/api/cdr/downloadRecord?filename={$filename}";
+        return "{$this->baseUrl}/pbxcore/api/cdr/playback?filename={$filename}";
     }
 
-    // ─────────────────────────────────────────
-    // EXTENSIONS
-    // ─────────────────────────────────────────
-
-    public function getExtensions(): array
-    {
-        return $this->handleResponse(
-            $this->http()->get("{$this->baseUrl}/pbxcore/api/extensions/getForSelect"),
-            'getExtensions'
-        );
-    }
-
-    // ─────────────────────────────────────────
-    // CAMPAIGN / AUTO DIALER
-    // ─────────────────────────────────────────
+    // ── Auto Dialer ──────────────────────────────────────────────────────────
 
     public function uploadAudio(string $filePath): array
     {
-        return $this->handleResponse(
-            Http::withHeaders(['X-Auth-Token' => $this->apiKey])
-                ->withoutVerifying()
-                ->attach('file', file_get_contents($filePath), basename($filePath))
-                ->post("{$this->baseUrl}/pbxcore/api/module-dialer/v1/audio"),
-            'uploadAudio'
-        );
+        $r = $this->http()
+            ->attach('file', file_get_contents($filePath), basename($filePath))
+            ->post("{$this->baseUrl}/pbxcore/api/module-dialer/v1/audio");
+        return $r->json() ?? [];
     }
 
     public function createDialerTask(array $data): array
     {
-        return $this->handleResponse(
-            $this->http()->post("{$this->baseUrl}/pbxcore/api/module-dialer/v1/task", $data),
-            'createDialerTask'
-        );
+        return $this->post('/pbxcore/api/module-dialer/v1/task', $data);
     }
 
     public function startDialerTask(int $id): array
     {
-        return $this->handleResponse(
-            $this->http()->post("{$this->baseUrl}/pbxcore/api/module-dialer/v1/task/start", ['id' => $id]),
-            'startDialerTask'
-        );
+        return $this->post('/pbxcore/api/module-dialer/v1/task/start', ['id' => $id]);
     }
 
     public function stopDialerTask(int $id): array
     {
-        return $this->handleResponse(
-            $this->http()->post("{$this->baseUrl}/pbxcore/api/module-dialer/v1/task/stop", ['id' => $id]),
-            'stopDialerTask'
-        );
+        return $this->post('/pbxcore/api/module-dialer/v1/task/stop', ['id' => $id]);
+    }
+
+    public function pauseDialerTask(int $id): array
+    {
+        return $this->post('/pbxcore/api/module-dialer/v1/task/pause', ['id' => $id]);
     }
 
     public function getDialerTaskStatus(int $id): array
     {
-        return $this->handleResponse(
-            $this->http()->get("{$this->baseUrl}/pbxcore/api/module-dialer/v1/task/status", ['id' => $id]),
-            'getDialerTaskStatus'
-        );
+        return $this->get('/pbxcore/api/module-dialer/v1/task/status', ['id' => $id]);
     }
 
-    public function createPolling(array $data): array
+    public function getDialerTasks(): array
     {
-        return $this->handleResponse(
-            $this->http()->post("{$this->baseUrl}/pbxcore/api/module-dialer/v1/polling", $data),
-            'createPolling'
-        );
+        return $this->get('/pbxcore/api/module-dialer/v1/task');
+    }
+
+    public function createPolling(array $script): array
+    {
+        return $this->post('/pbxcore/api/module-dialer/v1/polling', $script);
+    }
+
+    // ── IVR ──────────────────────────────────────────────────────────────────
+
+    public function getIVRMenus(): array
+    {
+        return $this->get('/pbxcore/api/ivrMenu/getForSelect');
+    }
+
+    public function saveIVRMenu(array $data): array
+    {
+        return $this->post('/pbxcore/api/ivrMenu/saveRecord', $data);
+    }
+
+    // ── Conference ───────────────────────────────────────────────────────────
+
+    public function getConferenceRooms(): array
+    {
+        return $this->get('/pbxcore/api/conferenceRooms/getForSelect');
+    }
+
+    public function saveConferenceRoom(array $data): array
+    {
+        return $this->post('/pbxcore/api/conferenceRooms/saveRecord', $data);
+    }
+
+    // ── System ───────────────────────────────────────────────────────────────
+
+    public function getSystemInfo(): array
+    {
+        return $this->get('/pbxcore/api/system/getInfo');
+    }
+
+    public function applyConfig(): array
+    {
+        return $this->post('/pbxcore/api/system/applyConfig');
+    }
+
+    public function getSoundFiles(): array
+    {
+        return $this->get('/pbxcore/api/soundFiles/getForSelect');
     }
 }

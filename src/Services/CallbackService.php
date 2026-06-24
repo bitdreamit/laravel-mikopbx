@@ -1,75 +1,53 @@
 <?php
-
 namespace BitDreamIT\MikoPBX\Services;
+use BitDreamIT\MikoPBX\Models\Callback;
+use BitDreamIT\MikoPBX\Models\CallLog;
 
-use BitDreamIT\MikoPBX\Models\CallbackRequest;
-use BitDreamIT\MikoPBX\Jobs\ProcessCallbackJob;
-use Illuminate\Support\Facades\Log;
-
-/**
- * Callback Service
- * Automatically schedule and retry missed call callbacks.
- */
 class CallbackService
 {
-    public function __construct(
-        private RestApiService $api,
-        private AMIService     $ami,
-    ) {}
+    public function __construct(private RestApiService $api) {}
 
-    /** Schedule a callback for a missed caller */
-    public function schedule(string $callerNumber, string $extension = '', int $delayMinutes = 5): CallbackRequest
+    public function schedule(string $number, array $opts = []): Callback
     {
-        $callback = CallbackRequest::create([
-            'caller_number' => $callerNumber,
-            'extension'     => $extension,
-            'status'        => 'pending',
-            'scheduled_at'  => now()->addMinutes($delayMinutes),
-            'max_attempts'  => config('mikopbx.max_retry_attempts', 3),
+        return Callback::create([
+            'number'       => $number,
+            'name'         => $opts['name'] ?? null,
+            'note'         => $opts['note'] ?? null,
+            'priority'     => $opts['priority'] ?? 'normal',
+            'assigned_to'  => $opts['assigned_to'] ?? null,
+            'scheduled_at' => $opts['scheduled_at'] ?? now()->addMinutes(5),
+            'call_log_id'  => $opts['call_log_id'] ?? null,
+            'created_by'   => auth()->id(),
         ]);
-
-        ProcessCallbackJob::dispatch($callback)->delay(now()->addMinutes($delayMinutes));
-
-        Log::info("Callback scheduled for $callerNumber in {$delayMinutes} mins (ID: {$callback->id})");
-
-        return $callback;
     }
 
-    /** Execute a callback immediately */
-    public function execute(CallbackRequest $callback): bool
+    public function scheduleFromMissedCall(CallLog $log): Callback
     {
-        $callback->increment('attempts');
-        $callback->update(['status' => 'processing']);
+        return $this->schedule($log->caller, [
+            'name'        => "Missed call — {$log->caller}",
+            'call_log_id' => $log->id,
+        ]);
+    }
 
+    public function attempt(Callback $cb, string $fromExtension): bool
+    {
+        $cb->update(['status' => 'in_progress', 'attempted_at' => now()]);
         try {
-            $result = $this->api->originate(
-                $callback->extension ?: config('mikopbx.default_callback_extension', '100'),
-                $callback->caller_number
-            );
-
-            $success = !empty($result['data']);
-            $callback->update(['status' => $success ? 'completed' : 'failed', 'completed_at' => $success ? now() : null]);
-
-            return $success;
+            $this->api->originate($fromExtension, $cb->number);
+            $cb->update(['status' => 'completed', 'completed_at' => now()]);
+            return true;
         } catch (\Throwable $e) {
-            Log::error("Callback failed for {$callback->caller_number}: " . $e->getMessage());
-            $callback->update(['status' => 'failed']);
+            $cb->update(['status' => 'failed']);
             return false;
         }
     }
 
-    /** Get all pending callbacks */
-    public function getPending(): \Illuminate\Database\Eloquent\Collection
+    public function pending(): \Illuminate\Database\Eloquent\Collection
     {
-        return CallbackRequest::where('status', 'pending')
-            ->where('scheduled_at', '<=', now())
-            ->where('attempts', '<', \DB::raw('max_attempts'))
+        return Callback::where('status', 'pending')
+            ->where(fn($q) => $q->whereNull('scheduled_at')->orWhere('scheduled_at', '<=', now()))
+            ->orderBy('priority', 'desc')
+            ->orderBy('created_at')
             ->get();
-    }
-
-    /** Cancel a scheduled callback */
-    public function cancel(int $id): bool
-    {
-        return (bool) CallbackRequest::where('id', $id)->update(['status' => 'cancelled']);
     }
 }

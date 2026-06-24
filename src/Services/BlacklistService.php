@@ -1,48 +1,34 @@
 <?php
-
 namespace BitDreamIT\MikoPBX\Services;
-
 use BitDreamIT\MikoPBX\Models\Blacklist;
 
-/**
- * Blacklist Service
- * Block specific numbers from calling your PBX.
- */
 class BlacklistService
 {
-    public function block(string $number, string $reason = '', ?string $expiresAt = null): Blacklist
+    public function add(string $number, string $reason = '', string $direction = 'both', ?string $expiresAt = null): Blacklist
     {
-        return Blacklist::updateOrCreate(
-            ['number' => $this->normalize($number)],
-            ['reason' => $reason, 'active' => true, 'expires_at' => $expiresAt]
-        );
+        return Blacklist::updateOrCreate(['number' => $number], [
+            'reason'     => $reason,
+            'direction'  => $direction,
+            'expires_at' => $expiresAt,
+            'created_by' => auth()->id(),
+        ]);
     }
 
-    public function unblock(string $number): bool
+    public function remove(string $number): bool
     {
-        return (bool) Blacklist::where('number', $this->normalize($number))->delete();
+        return (bool) Blacklist::where('number', $number)->delete();
     }
 
-    public function isBlocked(string $number): bool
+    public function isBlocked(string $number, string $direction = 'inbound'): bool
     {
-        return Blacklist::where('number', $this->normalize($number))
-            ->where('active', true)
+        return Blacklist::where('number', $number)
+            ->where(fn($q) => $q->where('direction', $direction)->orWhere('direction', 'both'))
             ->where(fn($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
             ->exists();
     }
 
-    public function getAll(): \Illuminate\Database\Eloquent\Collection
+    public function all(): \Illuminate\Database\Eloquent\Collection
     {
-        return Blacklist::where('active', true)->orderBy('created_at', 'desc')->get();
-    }
-
-    public function cleanExpired(): int
-    {
-        return Blacklist::where('expires_at', '<', now())->delete();
-    }
-
-    private function normalize(string $number): string
-    {
-        return preg_replace('/[^0-9+]/', '', $number);
+        return Blacklist::orderByDesc('created_at')->get();
     }
 }

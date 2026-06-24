@@ -2,78 +2,65 @@
 
 namespace BitDreamIT\MikoPBX\Services;
 
+use BitDreamIT\MikoPBX\Models\Extension;
+
 class AgentService
 {
-    public function __construct(
-        private RestApiService $api,
-        private AMIService     $ami
-    ) {}
+    public function __construct(private RestApiService $api) {}
 
-    // Get all agent statuses
-    public function getAllStatuses(): array
+    /** Get all agents with live SIP status merged */
+    public function all(): \Illuminate\Database\Eloquent\Collection
     {
-        return $this->api->getExtensionStatuses();
+        $agents  = Extension::orderBy('extension')->get();
+        $statuses = collect($this->api->getExtensionStatuses()['data'] ?? [])
+            ->keyBy('id');
+
+        return $agents->map(function ($agent) use ($statuses) {
+            $live = $statuses->get($agent->sip_peer ?? $agent->extension);
+            if ($live) {
+                $agent->status = match($live['state'] ?? '') {
+                    'REACHABLE', 'OK' => $agent->status === 'busy' ? 'busy' : 'online',
+                    'UNREACHABLE', 'UNKNOWN' => 'offline',
+                    default => $agent->status,
+                };
+            }
+            return $agent;
+        });
     }
 
-    // Get specific agent status
-    public function status(string $extension): string
+    /** Sync extensions from MikoPBX into local DB */
+    public function sync(): int
     {
-        $statuses = $this->api->getExtensionStatuses();
-        $agents   = $statuses['data'] ?? [];
+        $remoteExtensions = $this->api->getExtensions()['data'] ?? [];
+        $count = 0;
 
-        $agent = collect($agents)->firstWhere('number', $extension);
-        return $agent['status'] ?? 'unknown';
-    }
-
-    // Check if agent is online
-    public function isOnline(string $extension): bool
-    {
-        return in_array($this->status($extension), ['REGISTERED', 'OK']);
-    }
-
-    // Get all online agents
-    public function getOnlineAgents(): array
-    {
-        $statuses = $this->api->getExtensionStatuses();
-        $agents   = $statuses['data'] ?? [];
-
-        return collect($agents)
-            ->filter(fn($a) => in_array($a['status'] ?? '', ['REGISTERED', 'OK']))
-            ->values()
-            ->toArray();
-    }
-
-    // Make agent call a customer (click to call)
-    public function callCustomer(string $agentExtension, string $customerNumber): array
-    {
-        return $this->api->originate($agentExtension, $customerNumber);
-    }
-
-    // Transfer call to another agent
-    public function transferTo(string $channel, string $targetExtension): array
-    {
-        return $this->api->transfer($channel, $targetExtension);
-    }
-
-    // Hangup agent call
-    public function hangup(string $channel): array
-    {
-        return $this->api->hangup($channel);
-    }
-
-    // Get agent active calls
-    public function getActiveCalls(?string $extension = null): array
-    {
-        $calls = $this->api->getActiveCalls();
-        $data  = $calls['data'] ?? [];
-
-        if ($extension) {
-            return collect($data)
-                ->filter(fn($c) => str_contains($c['channel'] ?? '', $extension))
-                ->values()
-                ->toArray();
+        foreach ($remoteExtensions as $ext) {
+            Extension::updateOrCreate(
+                ['extension' => $ext['value'] ?? $ext['number'] ?? ''],
+                [
+                    'name'     => $ext['name'] ?? $ext['text'] ?? 'Unknown',
+                    'sip_peer' => $ext['value'] ?? null,
+                    'active'   => true,
+                ]
+            );
+            $count++;
         }
 
-        return $data;
+        return $count;
+    }
+
+    public function setStatus(string $extension, string $status): void
+    {
+        Extension::where('extension', $extension)->update(['status' => $status]);
+    }
+
+    public function getOnlineCount(): int
+    {
+        return Extension::whereIn('status', ['online', 'busy'])->count();
+    }
+
+    public function getAvailableAgents(): \Illuminate\Database\Eloquent\Collection
+    {
+        return Extension::where('status', 'online')->where('active', true)->get();
     }
 }

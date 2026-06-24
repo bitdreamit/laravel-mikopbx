@@ -2,44 +2,41 @@
 
 namespace BitDreamIT\MikoPBX\Tests;
 
-use Orchestra\Testbench\TestCase as OrchestraTestCase;
+use Orchestra\Testbench\TestCase as Orchestra;
 use BitDreamIT\MikoPBX\MikoPBXServiceProvider;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Database\Eloquent\Factories\Factory;
 
-abstract class TestCase extends OrchestraTestCase
+class TestCase extends Orchestra
 {
-    use RefreshDatabase;
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Factory::guessFactoryNamesUsing(
+            fn(string $modelName) => 'BitDreamIT\\MikoPBX\\Database\\Factories\\'.class_basename($modelName).'Factory'
+        );
+    }
 
     protected function getPackageProviders($app): array
     {
         return [MikoPBXServiceProvider::class];
     }
 
-    protected function getPackageAliases($app): array
+    public function getEnvironmentSetUp($app): void
     {
-        return [
-            'MikoPBX' => \BitDreamIT\MikoPBX\Facades\MikoPBX::class,
-        ];
-    }
-
-    protected function defineEnvironment($app): void
-    {
-        $app['config']->set('mikopbx.url',          'https://127.0.0.1');
-        $app['config']->set('mikopbx.api_key',       'test-api-key');
-        $app['config']->set('mikopbx.ami_host',      '127.0.0.1');
-        $app['config']->set('mikopbx.ami_port',      5038);
-        $app['config']->set('mikopbx.ami_username',  'test');
-        $app['config']->set('mikopbx.ami_secret',    'test');
-        $app['config']->set('database.default',      'sqlite');
-        $app['config']->set('database.connections.sqlite', [
-            'driver'   => 'sqlite',
+        config()->set('database.default', 'testing');
+        config()->set('database.connections.testing', [
+            'driver' => 'sqlite',
             'database' => ':memory:',
-            'prefix'   => '',
+            'prefix' => '',
         ]);
-    }
+        config()->set('mikopbx.url',           'http://localhost');
+        config()->set('mikopbx.api_key',        'test-key');
+        config()->set('mikopbx.ami.host',       'localhost');
+        config()->set('mikopbx.ami.secret',     'test');
+        config()->set('mikopbx.table_prefix',   'mikopbx_');
 
-    protected function defineDatabaseMigrations(): void
-    {
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        // Run migrations
+        $migration = include __DIR__.'/../database/migrations/2026_01_01_000001_create_mikopbx_tables.php';
+        $migration->up();
     }
 }

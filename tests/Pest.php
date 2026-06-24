@@ -1,24 +1,20 @@
 <?php
 
-uses(
-    \Orchestra\Testbench\TestCase::class,
-)->in('Feature', 'Unit');
+use BitDreamIT\MikoPBX\Tests\TestCase;
 
-uses()->beforeEach(function () {
-    \BitDreamIT\MikoPBX\Testing\MikoPBXFake::reset();
-})->in('Feature');
+uses(TestCase::class)->in('Feature', 'Unit');
 
 /*
-|--------------------------------------------------------------------------
-| Expectations
-|--------------------------------------------------------------------------
-*/
-
-expect()->extend('toBeValidPhoneNumber', function () {
-    $cleaned = preg_replace('/[^0-9]/', '', $this->value);
-    return expect(preg_match('/^(880)?01[3-9]\d{8}$/', $cleaned))->toBe(1);
+ * Custom expectations for MikoPBX tests.
+ */
+expect()->extend('toBeValidSipChannel', function () {
+    return $this->toMatch('/^(PJSIP|SIP)\/.+$/');
 });
 
-expect()->extend('toBeBetween', function (mixed $min, mixed $max) {
-    return expect($this->value)->toBeGreaterThanOrEqual($min)->toBeLessThanOrEqual($max);
+expect()->extend('toBePhoneNumber', function () {
+    return $this->toMatch('/^\d{7,15}$/');
+});
+
+expect()->extend('toBeCampaignStatus', function (string $status) {
+    return $this->toBe($status);
 });

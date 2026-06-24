@@ -7,16 +7,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class CampaignNumber extends Model
 {
-    protected $table = 'mikopbx_campaign_numbers';
-
-    protected $fillable = [
-        'campaign_id', 'number', 'status',
-        'attempts', 'last_attempt_at', 'result',
-    ];
-
+    protected $guarded = [];
     protected $casts = [
-        'last_attempt_at' => 'datetime',
+        'last_attempted_at' => 'datetime',
+        'next_attempt_at'   => 'datetime',
+        'meta'              => 'array',
     ];
+
+    public function getTable(): string
+    {
+        return config('mikopbx.table_prefix', 'mikopbx_') . 'campaign_numbers';
+    }
 
     public function campaign(): BelongsTo
     {

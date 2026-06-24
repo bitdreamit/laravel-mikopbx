@@ -3,35 +3,23 @@
 namespace BitDreamIT\MikoPBX\Commands;
 
 use Illuminate\Console\Command;
-use BitDreamIT\MikoPBX\Facades\MikoPBX;
-use BitDreamIT\MikoPBX\Models\Extension;
+use BitDreamIT\MikoPBX\Services\AgentService;
 
 class SyncExtensionsCommand extends Command
 {
     protected $signature   = 'mikopbx:sync-extensions';
-    protected $description = 'Sync extension statuses from MikoPBX to local database';
+    protected $description = 'Pull extensions from MikoPBX and upsert local database';
 
-    public function handle(): int
+    public function handle(AgentService $agents): int
     {
         $this->info('Syncing extensions from MikoPBX...');
         try {
-            $data = MikoPBX::call()->getExtensionStatuses()['data'] ?? [];
-            $bar  = $this->output->createProgressBar(count($data));
-            $bar->start();
-            foreach ($data as $ext) {
-                Extension::updateOrCreate(
-                    ['number' => $ext['number'] ?? ''],
-                    ['online' => in_array($ext['status'] ?? '', ['REGISTERED', 'OK']), 'status' => $ext['status'] ?? 'UNREACHABLE', 'last_seen_at' => now()]
-                );
-                $bar->advance();
-            }
-            $bar->finish();
-            $this->newLine();
-            $this->info('Synced ' . count($data) . ' extensions.');
+            $count = $agents->sync();
+            $this->info("✅ Synced {$count} extensions.");
         } catch (\Throwable $e) {
-            $this->error('Sync failed: ' . $e->getMessage());
-            return self::FAILURE;
+            $this->error("❌ {$e->getMessage()}");
+            return 1;
         }
-        return self::SUCCESS;
+        return 0;
     }
 }

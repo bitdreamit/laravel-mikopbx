@@ -1,5 +1,4 @@
 <?php
-// database/migrations/2026_01_01_000001_create_mikopbx_tables.php
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
@@ -9,180 +8,184 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // ── Call Logs ─────────────────────────────────────────────
-        Schema::create('mikopbx_call_logs', function (Blueprint $t) {
-            $t->id();
-            $t->string('caller')->nullable()->index();
-            $t->string('caller_name')->nullable();
-            $t->string('extension')->nullable()->index();
-            $t->string('channel')->nullable()->index();
-            $t->string('destination')->nullable();
-            $t->enum('direction', ['inbound', 'outbound', 'internal'])->default('inbound');
-            $t->enum('status', ['ringing', 'answered', 'ended', 'missed', 'busy', 'failed'])->default('ringing');
-            $t->string('cause')->nullable();
-            $t->unsignedInteger('duration')->default(0);
-            $t->string('recording_file')->nullable();
-            $t->string('queue')->nullable();
-            $t->string('ivr_key_pressed')->nullable();
-            $t->json('metadata')->nullable();
-            $t->timestamp('started_at')->nullable();
-            $t->timestamp('answered_at')->nullable();
-            $t->timestamp('ended_at')->nullable();
-            $t->timestamps();
-            $t->index(['caller', 'started_at']);
-            $t->index(['extension', 'started_at']);
-            $t->index(['status', 'direction']);
-        });
+        $p = config('mikopbx.table_prefix', 'mikopbx_');
 
-        // ── Extensions ────────────────────────────────────────────
-        Schema::create('mikopbx_extensions', function (Blueprint $t) {
+        // ── Extensions / Agents ─────────────────────────────────────────────
+        Schema::create("{$p}extensions", function (Blueprint $t) {
             $t->id();
-            $t->string('number', 20)->unique();
+            $t->string('extension', 20)->unique();
             $t->string('name');
             $t->string('email')->nullable();
+            $t->string('mobile')->nullable();
             $t->string('sip_peer')->nullable();
-            $t->string('department')->nullable();
-            $t->boolean('online')->default(false);
-            $t->string('status')->default('UNREACHABLE');
-            $t->string('current_channel')->nullable();
+            $t->enum('status', ['online', 'offline', 'busy', 'dnd', 'away'])->default('offline');
+            $t->enum('role', ['agent', 'supervisor', 'admin'])->default('agent');
+            $t->boolean('active')->default(true);
+            $t->json('meta')->nullable();
             $t->timestamp('last_seen_at')->nullable();
             $t->timestamps();
         });
 
-        // ── Campaigns ─────────────────────────────────────────────
-        Schema::create('mikopbx_campaigns', function (Blueprint $t) {
+        // ── Call Logs (CDR) ──────────────────────────────────────────────────
+        Schema::create("{$p}call_logs", function (Blueprint $t) {
             $t->id();
-            $t->string('name');
-            $t->unsignedInteger('mikopbx_task_id')->nullable();
-            $t->string('audio_file')->nullable();
-            $t->string('type')->default('broadcast'); // broadcast | ivr_survey | predictive
-            $t->unsignedTinyInteger('max_channels')->default(5);
-            $t->string('status')->default('created');
-            $t->unsignedInteger('total_numbers')->default(0);
-            $t->unsignedInteger('dialed_count')->default(0);
-            $t->unsignedInteger('answered_count')->default(0);
-            $t->unsignedInteger('missed_count')->default(0);
-            $t->unsignedInteger('failed_count')->default(0);
-            $t->json('ivr_options')->nullable();
-            $t->json('metadata')->nullable();
-            $t->timestamp('scheduled_at')->nullable();
-            $t->timestamp('started_at')->nullable();
-            $t->timestamp('stopped_at')->nullable();
-            $t->timestamp('finished_at')->nullable();
-            $t->timestamps();
-        });
-
-        // ── Campaign Numbers ──────────────────────────────────────
-        Schema::create('mikopbx_campaign_numbers', function (Blueprint $t) {
-            $t->id();
-            $t->foreignId('campaign_id')->constrained('mikopbx_campaigns')->cascadeOnDelete();
-            $t->string('number', 20)->index();
-            $t->string('name')->nullable();
-            $t->enum('status', ['pending', 'dialing', 'answered', 'missed', 'failed', 'skipped'])->default('pending');
-            $t->unsignedTinyInteger('attempts')->default(0);
-            $t->string('ivr_response')->nullable();
-            $t->unsignedInteger('duration')->default(0);
+            $t->string('uniqueid', 64)->unique()->nullable();
+            $t->string('linkedid', 64)->nullable()->index();
+            $t->string('caller', 30)->index();
+            $t->string('callee', 30)->nullable();
+            $t->string('extension', 20)->nullable()->index();
+            $t->string('channel', 100)->nullable()->index();
+            $t->enum('direction', ['inbound', 'outbound', 'internal'])->default('inbound');
+            $t->enum('status', ['ringing', 'answered', 'missed', 'busy', 'failed', 'voicemail', 'transferred', 'ended'])->default('ringing');
+            $t->string('cause', 60)->nullable();
+            $t->unsignedInteger('duration')->default(0);       // seconds
+            $t->unsignedInteger('billsec')->default(0);        // answered seconds
             $t->string('recording_file')->nullable();
-            $t->text('notes')->nullable();
-            $t->timestamp('last_attempt_at')->nullable();
-            $t->timestamps();
-            $t->index(['campaign_id', 'status']);
-        });
-
-        // ── Callbacks ─────────────────────────────────────────────
-        Schema::create('mikopbx_callbacks', function (Blueprint $t) {
-            $t->id();
-            $t->string('caller_number')->index();
-            $t->string('caller_name')->nullable();
-            $t->string('extension')->nullable();
-            $t->string('queue')->nullable();
-            $t->string('reason')->default('missed_call');
-            $t->enum('status', ['pending', 'processing', 'completed', 'failed', 'cancelled'])->default('pending');
-            $t->unsignedTinyInteger('attempts')->default(0);
-            $t->unsignedTinyInteger('max_attempts')->default(3);
-            $t->timestamp('scheduled_at')->nullable();
-            $t->timestamp('completed_at')->nullable();
-            $t->text('notes')->nullable();
-            $t->timestamps();
-            $t->index(['status', 'scheduled_at']);
-        });
-
-        // ── Conferences ───────────────────────────────────────────
-        Schema::create('mikopbx_conferences', function (Blueprint $t) {
-            $t->id();
-            $t->string('bridge_id')->nullable()->unique();
-            $t->string('name');
-            $t->string('status')->default('active');
-            $t->string('recording_name')->nullable();
-            $t->json('participants')->nullable();
+            $t->string('recording_url')->nullable();
+            $t->foreignId('campaign_id')->nullable()->constrained("{$p}campaigns")->nullOnDelete();
+            $t->foreignId('callback_id')->nullable();
+            $t->json('meta')->nullable();
             $t->timestamp('started_at')->nullable();
+            $t->timestamp('answered_at')->nullable();
             $t->timestamp('ended_at')->nullable();
-            $t->unsignedInteger('duration')->default(0);
             $t->timestamps();
         });
 
-        // ── Blacklist ─────────────────────────────────────────────
-        Schema::create('mikopbx_blacklist', function (Blueprint $t) {
+        // ── Campaigns ────────────────────────────────────────────────────────
+        Schema::create("{$p}campaigns", function (Blueprint $t) {
             $t->id();
-            $t->string('number', 20)->unique();
+            $t->string('name');
+            $t->enum('type', ['agent_connect', 'voice_broadcast', 'survey', 'sms_blast'])->default('agent_connect');
+            $t->enum('status', ['draft', 'running', 'paused', 'completed', 'failed'])->default('draft');
+            $t->string('audio_file')->nullable();
+            $t->string('audio_url')->nullable();
+            $t->unsignedTinyInteger('max_channels')->default(5);
+            $t->unsignedTinyInteger('retry_attempts')->default(3);
+            $t->unsignedSmallInteger('retry_delay')->default(300);
+            $t->unsignedSmallInteger('dial_timeout')->default(30);
+            $t->string('caller_id')->nullable();
+            $t->string('destination_extension')->nullable();
+            $t->json('ivr_script')->nullable();
+            $t->unsignedInteger('mikopbx_task_id')->nullable();
+            $t->unsignedInteger('total_numbers')->default(0);
+            $t->unsignedInteger('dialed')->default(0);
+            $t->unsignedInteger('answered')->default(0);
+            $t->unsignedInteger('failed')->default(0);
+            $t->unsignedInteger('retrying')->default(0);
+            $t->timestamp('scheduled_at')->nullable();
+            $t->timestamp('started_at')->nullable();
+            $t->timestamp('completed_at')->nullable();
+            $t->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
+            $t->json('meta')->nullable();
+            $t->timestamps();
+        });
+
+        // ── Campaign Numbers ─────────────────────────────────────────────────
+        Schema::create("{$p}campaign_numbers", function (Blueprint $t) {
+            $t->id();
+            $t->foreignId('campaign_id')->constrained("{$p}campaigns")->cascadeOnDelete();
+            $t->string('number', 30)->index();
+            $t->string('name')->nullable();
+            $t->enum('status', ['pending', 'dialing', 'answered', 'no_answer', 'busy', 'failed', 'opted_out'])->default('pending');
+            $t->unsignedTinyInteger('attempt')->default(0);
+            $t->string('dtmf_response')->nullable();
+            $t->unsignedSmallInteger('duration')->default(0);
+            $t->timestamp('last_attempted_at')->nullable();
+            $t->timestamp('next_attempt_at')->nullable();
+            $t->json('meta')->nullable();
+            $t->timestamps();
+        });
+
+        // ── Blacklist ────────────────────────────────────────────────────────
+        Schema::create("{$p}blacklist", function (Blueprint $t) {
+            $t->id();
+            $t->string('number', 30)->unique();
             $t->string('reason')->nullable();
-            $t->string('added_by')->nullable();
+            $t->enum('direction', ['inbound', 'outbound', 'both'])->default('both');
             $t->timestamp('expires_at')->nullable();
+            $t->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
+            $t->timestamps();
+        });
+
+        // ── Callbacks ────────────────────────────────────────────────────────
+        Schema::create("{$p}callbacks", function (Blueprint $t) {
+            $t->id();
+            $t->string('number', 30)->index();
+            $t->string('name')->nullable();
+            $t->string('note')->nullable();
+            $t->enum('status', ['pending', 'in_progress', 'completed', 'cancelled', 'failed'])->default('pending');
+            $t->enum('priority', ['low', 'normal', 'high', 'urgent'])->default('normal');
+            $t->foreignId('assigned_to')->nullable()->constrained("{$p}extensions")->nullOnDelete();
+            $t->foreignId('call_log_id')->nullable()->constrained("{$p}call_logs")->nullOnDelete();
+            $t->timestamp('scheduled_at')->nullable();
+            $t->timestamp('attempted_at')->nullable();
+            $t->timestamp('completed_at')->nullable();
+            $t->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
+            $t->timestamps();
+        });
+
+        // ── IVR Trees ────────────────────────────────────────────────────────
+        Schema::create("{$p}ivr_trees", function (Blueprint $t) {
+            $t->id();
+            $t->string('name');
+            $t->string('description')->nullable();
+            $t->json('nodes');     // full IVR node graph
+            $t->boolean('active')->default(false);
+            $t->string('greeting_audio')->nullable();
+            $t->unsignedTinyInteger('timeout_seconds')->default(5);
+            $t->unsignedTinyInteger('max_retries')->default(3);
+            $t->timestamps();
+        });
+
+        // ── Conference Rooms ─────────────────────────────────────────────────
+        Schema::create("{$p}conference_rooms", function (Blueprint $t) {
+            $t->id();
+            $t->string('room_number', 20)->unique();
+            $t->string('name');
+            $t->string('pin')->nullable();
+            $t->string('admin_pin')->nullable();
+            $t->boolean('record')->default(false);
+            $t->boolean('mute_on_join')->default(false);
+            $t->unsignedTinyInteger('max_participants')->default(10);
             $t->boolean('active')->default(true);
             $t->timestamps();
         });
 
-        // ── IVR Menus ─────────────────────────────────────────────
-        Schema::create('mikopbx_ivr_menus', function (Blueprint $t) {
+        // ── Agent Status Log ─────────────────────────────────────────────────
+        Schema::create("{$p}agent_status_log", function (Blueprint $t) {
             $t->id();
-            $t->string('name')->unique();
-            $t->string('greeting_file')->nullable();
-            $t->unsignedTinyInteger('timeout')->default(10);
-            $t->unsignedTinyInteger('max_invalid')->default(3);
-            $t->json('keypresses');
-            $t->string('timeout_action')->default('repeat');
-            $t->string('invalid_action')->default('repeat');
-            $t->boolean('active')->default(true);
-            $t->unsignedInteger('mikopbx_id')->nullable();
-            $t->timestamps();
-        });
-
-        // ── CDR Sync (for reporting) ───────────────────────────────
-        Schema::create('mikopbx_cdr_sync', function (Blueprint $t) {
-            $t->id();
-            $t->string('uniqueid')->unique();
-            $t->string('src')->nullable();
-            $t->string('dst')->nullable();
-            $t->string('dcontext')->nullable();
-            $t->string('clid')->nullable();
-            $t->string('channel')->nullable();
-            $t->string('dstchannel')->nullable();
-            $t->string('lastapp')->nullable();
-            $t->string('lastdata')->nullable();
-            $t->timestamp('calldate')->nullable();
+            $t->foreignId('extension_id')->constrained("{$p}extensions")->cascadeOnDelete();
+            $t->string('from_status', 20);
+            $t->string('to_status', 20);
             $t->unsignedInteger('duration')->default(0);
-            $t->unsignedInteger('billsec')->default(0);
-            $t->string('disposition')->nullable();
-            $t->string('amaflags')->nullable();
-            $t->string('accountcode')->nullable();
-            $t->string('userfield')->nullable();
-            $t->string('recordingfile')->nullable();
+            $t->timestamp('changed_at');
             $t->timestamps();
-            $t->index(['src', 'calldate']);
-            $t->index(['dst', 'calldate']);
+        });
+
+        // ── Health Check Log ─────────────────────────────────────────────────
+        Schema::create("{$p}health_logs", function (Blueprint $t) {
+            $t->id();
+            $t->enum('status', ['healthy', 'degraded', 'critical'])->default('healthy');
+            $t->boolean('ami_connected')->default(false);
+            $t->boolean('ari_connected')->default(false);
+            $t->boolean('sip_trunk_up')->default(false);
+            $t->unsignedSmallInteger('active_calls')->default(0);
+            $t->unsignedSmallInteger('extensions_online')->default(0);
+            $t->json('details')->nullable();
+            $t->timestamp('checked_at');
+            $t->timestamps();
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('mikopbx_cdr_sync');
-        Schema::dropIfExists('mikopbx_ivr_menus');
-        Schema::dropIfExists('mikopbx_blacklist');
-        Schema::dropIfExists('mikopbx_conferences');
-        Schema::dropIfExists('mikopbx_callbacks');
-        Schema::dropIfExists('mikopbx_campaign_numbers');
-        Schema::dropIfExists('mikopbx_campaigns');
-        Schema::dropIfExists('mikopbx_extensions');
-        Schema::dropIfExists('mikopbx_call_logs');
+        $p = config('mikopbx.table_prefix', 'mikopbx_');
+        foreach ([
+            "{$p}health_logs", "{$p}agent_status_log", "{$p}conference_rooms",
+            "{$p}ivr_trees", "{$p}callbacks", "{$p}blacklist",
+            "{$p}campaign_numbers", "{$p}call_logs", "{$p}campaigns", "{$p}extensions",
+        ] as $table) {
+            Schema::dropIfExists($table);
+        }
     }
 };

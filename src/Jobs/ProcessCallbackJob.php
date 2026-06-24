@@ -7,27 +7,26 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use BitDreamIT\MikoPBX\Models\CallbackRequest;
-use BitDreamIT\MikoPBX\Services\CallbackService;
+use BitDreamIT\MikoPBX\Models\CallLog;
+use BitDreamIT\MikoPBX\Services\{CallbackService, SmsService};
 
 class ProcessCallbackJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries   = 3;
-    public int $timeout = 60;
+    public function __construct(public CallLog $callLog) {}
 
-    public function __construct(private CallbackRequest $callback) {}
-
-    public function handle(CallbackService $service): void
+    public function handle(CallbackService $callbacks, SmsService $sms): void
     {
-        if (!$this->callback->canRetry()) {
-            $this->callback->update(['status' => 'failed']);
-            return;
-        }
-        $success = $service->execute($this->callback);
-        if (!$success && $this->callback->canRetry()) {
-            self::dispatch($this->callback->fresh())->delay(now()->addMinutes(config('mikopbx.retry_delay_minutes', 5)));
+        // Create callback record
+        $callbacks->scheduleFromMissedCall($this->callLog);
+
+        // Send SMS alert to agent / supervisor
+        if (config('mikopbx.features.sms_alerts')) {
+            $sms->send(
+                config('mikopbx.sms.from'),
+                "Missed call from {$this->callLog->caller} at " . now()->format('H:i')
+            );
         }
     }
 }

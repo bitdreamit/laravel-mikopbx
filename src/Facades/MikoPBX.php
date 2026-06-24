@@ -4,25 +4,34 @@ namespace BitDreamIT\MikoPBX\Facades;
 
 use Illuminate\Support\Facades\Facade;
 use BitDreamIT\MikoPBX\MikoPBXManager;
-use BitDreamIT\MikoPBX\Services\{RestApiService,AMIService,ARIService,CampaignService,AgentService,RecordingService,ConferenceService,BlacklistService,AnalyticsService,CallbackService,HealthCheckService};
-use BitDreamIT\MikoPBX\Services\IVRBuilder;
 
 /**
- * @method static RestApiService     call()
- * @method static AMIService         ami()
- * @method static ARIService         ari()
- * @method static CampaignService    campaign()
- * @method static AgentService       agent()
- * @method static RecordingService   recording()
- * @method static ConferenceService  conference()
- * @method static BlacklistService   blacklist()
- * @method static AnalyticsService   analytics()
- * @method static CallbackService    callback()
- * @method static HealthCheckService health()
- * @method static IVRBuilder         ivr(string $name)
- * @see MikoPBXManager
+ * @method static \BitDreamIT\MikoPBX\Services\RestApiService api()
+ * @method static \BitDreamIT\MikoPBX\Services\AMIService ami()
+ * @method static \BitDreamIT\MikoPBX\Services\ARIService ari()
+ * @method static \BitDreamIT\MikoPBX\Services\CampaignService campaign()
+ * @method static \BitDreamIT\MikoPBX\Services\AgentService agent()
+ * @method static \BitDreamIT\MikoPBX\Services\RecordingService recording()
+ * @method static \BitDreamIT\MikoPBX\Services\BlacklistService blacklist()
+ * @method static \BitDreamIT\MikoPBX\Services\CallbackService callback()
+ * @method static \BitDreamIT\MikoPBX\Services\ConferenceService conference()
+ * @method static \BitDreamIT\MikoPBX\Services\IVRService ivr()
+ * @method static \BitDreamIT\MikoPBX\Services\AnalyticsService analytics()
+ * @method static \BitDreamIT\MikoPBX\Services\HealthCheckService health()
+ * @method static \BitDreamIT\MikoPBX\Services\SmsService sms()
+ * @method static \BitDreamIT\MikoPBX\Services\WebDialerService dialer()
+ * @method static array originate(string $from, string $to)
+ * @method static array transfer(string $channel, string $to)
+ * @method static array hangup(string $channel)
+ * @method static array activeCalls()
+ * @method static array extensions()
+ *
+ * @see \BitDreamIT\MikoPBX\MikoPBXManager
  */
 class MikoPBX extends Facade
 {
-    protected static function getFacadeAccessor(): string { return 'mikopbx'; }
+    protected static function getFacadeAccessor(): string
+    {
+        return 'mikopbx';
+    }
 }

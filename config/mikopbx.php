@@ -2,91 +2,137 @@
 
 return [
 
-    /*|--------------------------------------------------------------------------
+    /*
+    |--------------------------------------------------------------------------
     | MikoPBX REST API
-    |--------------------------------------------------------------------------*/
-    'url'         => env('MIKOPBX_URL', 'https://127.0.0.1'),
-    'api_key'     => env('MIKOPBX_API_KEY', ''),
-    'verify_ssl'  => env('MIKOPBX_VERIFY_SSL', false),
-    'timeout'     => env('MIKOPBX_TIMEOUT', 30),
+    |--------------------------------------------------------------------------
+    */
+    'url'     => env('MIKOPBX_URL', 'https://192.168.1.100'),
+    'api_key' => env('MIKOPBX_API_KEY', ''),
+    'timeout' => env('MIKOPBX_TIMEOUT', 10),
+    'verify_ssl' => env('MIKOPBX_VERIFY_SSL', false),
 
-    /*|--------------------------------------------------------------------------
-    | Asterisk AMI
-    |--------------------------------------------------------------------------*/
-    'ami_host'     => env('MIKOPBX_AMI_HOST', '127.0.0.1'),
-    'ami_port'     => env('MIKOPBX_AMI_PORT', 5038),
-    'ami_username' => env('MIKOPBX_AMI_USER', 'admin'),
-    'ami_secret'   => env('MIKOPBX_AMI_SECRET', ''),
-
-    /*|--------------------------------------------------------------------------
-    | ARI (Asterisk REST Interface)
-    |--------------------------------------------------------------------------*/
-    'ari_url'      => env('MIKOPBX_ARI_URL', 'http://127.0.0.1:8088'),
-    'ari_username' => env('MIKOPBX_ARI_USER', 'ari_admin'),
-    'ari_secret'   => env('MIKOPBX_ARI_SECRET', ''),
-
-    /*|--------------------------------------------------------------------------
-    | Call Settings
-    |--------------------------------------------------------------------------*/
-    'default_context'             => env('MIKOPBX_CONTEXT', 'from-internal'),
-    'default_timeout'             => env('MIKOPBX_CALL_TIMEOUT', 30000),
-    'default_callback_extension'  => env('MIKOPBX_CALLBACK_EXT', '100'),
-    'recording_path'              => env('MIKOPBX_RECORDING_PATH', '/var/spool/mikopbx/storage/ast/'),
-    'max_retry_attempts'          => env('MIKOPBX_MAX_RETRY', 3),
-    'retry_delay_minutes'         => env('MIKOPBX_RETRY_DELAY', 5),
-
-    /*|--------------------------------------------------------------------------
-    | Campaign Settings
-    |--------------------------------------------------------------------------*/
-    'campaign_max_channels' => env('MIKOPBX_CAMPAIGN_CHANNELS', 5),
-    'campaign_dial_prefix'  => env('MIKOPBX_DIAL_PREFIX', ''),
-
-    /*|--------------------------------------------------------------------------
-    | Webhook
-    |--------------------------------------------------------------------------*/
-    'webhook_secret' => env('MIKOPBX_WEBHOOK_SECRET', ''),
-
-    /*|--------------------------------------------------------------------------
-    | Routes
-    |--------------------------------------------------------------------------*/
-    'routes' => [
-        'enabled'    => env('MIKOPBX_ROUTES_ENABLED', true),
-        'prefix'     => env('MIKOPBX_ROUTES_PREFIX', 'mikopbx'),
-        'middleware' => ['api'],
+    /*
+    |--------------------------------------------------------------------------
+    | Asterisk Manager Interface (AMI)
+    |--------------------------------------------------------------------------
+    */
+    'ami' => [
+        'host'     => env('MIKOPBX_AMI_HOST', '192.168.1.100'),
+        'port'     => env('MIKOPBX_AMI_PORT', 5038),
+        'username' => env('MIKOPBX_AMI_USER', 'admin'),
+        'secret'   => env('MIKOPBX_AMI_SECRET', ''),
+        'timeout'  => env('MIKOPBX_AMI_TIMEOUT', 10),
     ],
-    'route_api_key' => env('MIKOPBX_ROUTE_API_KEY', ''),
 
-    /*|--------------------------------------------------------------------------
-    | SMS Notifications
-    |--------------------------------------------------------------------------*/
+    /*
+    |--------------------------------------------------------------------------
+    | Asterisk REST Interface (ARI) — WebSocket
+    |--------------------------------------------------------------------------
+    */
+    'ari' => [
+        'url'      => env('MIKOPBX_ARI_URL', 'http://192.168.1.100:8088'),
+        'username' => env('MIKOPBX_ARI_USER', 'admin'),
+        'password' => env('MIKOPBX_ARI_PASSWORD', ''),
+        'app'      => env('MIKOPBX_ARI_APP', 'laravel-mikopbx'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Web Dialer (WebRTC/SIP.js softphone)
+    |--------------------------------------------------------------------------
+    */
+    'dialer' => [
+        'enabled'         => env('MIKOPBX_DIALER_ENABLED', true),
+        'sip_server'      => env('MIKOPBX_SIP_SERVER', '192.168.1.100'),
+        'sip_ws_port'     => env('MIKOPBX_SIP_WS_PORT', 8088),
+        'sip_wss_enabled' => env('MIKOPBX_SIP_WSS', false),
+        'stun_server'     => env('MIKOPBX_STUN', 'stun:stun.l.google.com:19302'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Routing — prefix and middleware
+    |--------------------------------------------------------------------------
+    */
+    'route_prefix'     => env('MIKOPBX_ROUTE_PREFIX', 'pbx'),
+    'route_middleware' => ['web', 'auth'],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Database table prefix
+    |--------------------------------------------------------------------------
+    */
+    'table_prefix' => 'mikopbx_',
+
+    /*
+    |--------------------------------------------------------------------------
+    | Features toggle
+    |--------------------------------------------------------------------------
+    */
+    'features' => [
+        'campaigns'   => true,
+        'auto_dialer' => true,
+        'recordings'  => true,
+        'blacklist'   => true,
+        'callbacks'   => true,
+        'conference'  => true,
+        'ivr_builder' => true,
+        'analytics'   => true,
+        'health_check'=> true,
+        'sms_alerts'  => env('MIKOPBX_SMS_ENABLED', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | SMS Gateway (for missed call alerts)
+    |--------------------------------------------------------------------------
+    */
     'sms' => [
-        'driver'         => env('MIKOPBX_SMS_DRIVER', 'custom'), // twilio|vonage|ssl_bd|custom
-        'twilio_sid'     => env('TWILIO_SID', ''),
-        'twilio_token'   => env('TWILIO_TOKEN', ''),
-        'twilio_from'    => env('TWILIO_FROM', ''),
-        'vonage_key'     => env('VONAGE_KEY', ''),
-        'vonage_secret'  => env('VONAGE_SECRET', ''),
-        'vonage_from'    => env('VONAGE_FROM', ''),
-        'ssl_bd_url'     => env('SSL_BD_SMS_URL', ''),
-        'ssl_bd_api_key' => env('SSL_BD_API_KEY', ''),
-        'ssl_bd_sender'  => env('SSL_BD_SENDER', ''),
-        'custom_url'     => env('MIKOPBX_SMS_URL', ''),
-        'custom_params'  => [],
+        'driver'  => env('MIKOPBX_SMS_DRIVER', 'ssl_wireless'), // ssl_wireless | twilio | vonage
+        'api_key' => env('MIKOPBX_SMS_API_KEY', ''),
+        'from'    => env('MIKOPBX_SMS_FROM', ''),
     ],
 
-    /*|--------------------------------------------------------------------------
-    | Notifications
-    |--------------------------------------------------------------------------*/
-    'notifications' => [
-        'channels'         => ['mail', 'database'],
-        'missed_call'      => env('MIKOPBX_NOTIFY_MISSED', true),
-        'voicemail'        => env('MIKOPBX_NOTIFY_VOICEMAIL', true),
-        'campaign_complete'=> env('MIKOPBX_NOTIFY_CAMPAIGN', true),
+    /*
+    |--------------------------------------------------------------------------
+    | Call recording storage
+    |--------------------------------------------------------------------------
+    */
+    'recordings' => [
+        'disk'    => env('MIKOPBX_RECORDING_DISK', 'local'),
+        'path'    => env('MIKOPBX_RECORDING_PATH', 'mikopbx/recordings'),
+        'proxy'   => env('MIKOPBX_RECORDING_PROXY', true), // proxy through Laravel for security
     ],
 
-    /*|--------------------------------------------------------------------------
-    | Queue
-    |--------------------------------------------------------------------------*/
-    'queue' => env('MIKOPBX_QUEUE', 'default'),
+    /*
+    |--------------------------------------------------------------------------
+    | Auto Dialer defaults
+    |--------------------------------------------------------------------------
+    */
+    'dialer_defaults' => [
+        'max_channels'   => 5,
+        'retry_attempts' => 3,
+        'retry_delay'    => 300, // seconds
+        'dial_timeout'   => 30,  // seconds per call attempt
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Agent / Extension defaults
+    |--------------------------------------------------------------------------
+    */
+    'agent' => [
+        'ring_time'    => 20,   // seconds before failover
+        'wrap_up_time' => 30,   // seconds after call ends
+        'max_calls'    => 1,    // concurrent calls per agent
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Health check schedule (minutes)
+    |--------------------------------------------------------------------------
+    */
+    'health_check_interval' => env('MIKOPBX_HEALTH_INTERVAL', 5),
 
 ];

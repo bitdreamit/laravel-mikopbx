@@ -2,167 +2,234 @@
 
 namespace BitDreamIT\MikoPBX\Testing;
 
-use BitDreamIT\MikoPBX\Events\IncomingCallEvent;
-use BitDreamIT\MikoPBX\Events\CallEndedEvent;
-use BitDreamIT\MikoPBX\Models\CallLog;
-use Illuminate\Support\Facades\Event;
+use BitDreamIT\MikoPBX\MikoPBXManager;
+use Illuminate\Foundation\Application;
 
 /**
- * MikoPBXFake — Test helper for unit tests
+ * MikoPBXFake — use in tests to intercept all MikoPBX calls.
  *
- * Usage in tests:
- *   MikoPBXFake::fake();
- *   MikoPBX::call()->originate('101', '01711XXXXXX');
- *   MikoPBXFake::assertOriginated('101', '01711XXXXXX');
- *   MikoPBXFake::assertCallCount(1);
+ * Usage in a test:
+ *
+ *   use BitDreamIT\MikoPBX\Testing\MikoPBXFake;
+ *
+ *   protected function setUp(): void
+ *   {
+ *       parent::setUp();
+ *       $this->fake = MikoPBXFake::make($this->app);
+ *   }
+ *
+ *   public function test_call_is_originated(): void
+ *   {
+ *       $this->fake->shouldOriginate('101', '01711000000');
+ *       // ... trigger your feature
+ *       $this->fake->assertOriginated('101', '01711000000');
+ *   }
  */
 class MikoPBXFake
 {
-    private static array $originatedCalls = [];
-    private static array $transferredCalls = [];
-    private static array $hungupChannels = [];
-    private static array $campaigns = [];
+    private array $originateCalls  = [];
+    private array $transferCalls   = [];
+    private array $hangupCalls     = [];
+    private array $campaignActions = [];
+    private bool  $shouldFail      = false;
 
-    public static function fake(): void
+    private function __construct() {}
+
+    public static function make(Application $app): static
     {
-        static::reset();
-        Event::fake([IncomingCallEvent::class, CallEndedEvent::class]);
+        $fake = new static();
+
+        $app->instance('mikopbx', new class($fake) extends MikoPBXManager {
+            public function __construct(private MikoPBXFake $fake)
+            {
+                // Skip parent constructor
+            }
+
+            public function originate(string $from, string $to): array
+            {
+                $this->fake->recordOriginate($from, $to);
+                if ($this->fake->willFail()) throw new \RuntimeException('MikoPBXFake: forced failure');
+                return ['success' => true, 'from' => $from, 'to' => $to];
+            }
+
+            public function transfer(string $channel, string $to): array
+            {
+                $this->fake->recordTransfer($channel, $to);
+                return ['success' => true];
+            }
+
+            public function hangup(string $channel): array
+            {
+                $this->fake->recordHangup($channel);
+                return ['success' => true];
+            }
+
+            public function activeCalls(): array
+            {
+                return ['data' => $this->fake->fakeActiveCalls()];
+            }
+
+            public function api(): \BitDreamIT\MikoPBX\Services\RestApiService
+            {
+                return new FakeRestApiService($this->fake);
+            }
+        });
+
+        return $fake;
     }
 
-    public static function reset(): void
+    // ── Recording ────────────────────────────────────────────────────────
+
+    public function recordOriginate(string $from, string $to): void
     {
-        static::$originatedCalls  = [];
-        static::$transferredCalls = [];
-        static::$hungupChannels   = [];
-        static::$campaigns        = [];
+        $this->originateCalls[] = compact('from', 'to');
     }
 
-    // ─────────────────────────────────────────
-    // SIMULATE EVENTS
-    // ─────────────────────────────────────────
-
-    /** Simulate an incoming call arriving */
-    public static function simulateIncomingCall(string $caller, string $extension, string $channel = ''): void
+    public function recordTransfer(string $channel, string $to): void
     {
-        $channel = $channel ?: 'PJSIP/' . $extension . '-' . uniqid();
-
-        CallLog::create([
-            'caller'     => $caller,
-            'extension'  => $extension,
-            'channel'    => $channel,
-            'direction'  => 'inbound',
-            'status'     => 'ringing',
-            'started_at' => now(),
-        ]);
-
-        event(new IncomingCallEvent($caller, $extension, $channel));
+        $this->transferCalls[] = compact('channel', 'to');
     }
 
-    /** Simulate a call ending */
-    public static function simulateCallEnded(string $channel, string $cause = 'NORMAL_CLEARING', int $duration = 60, string $extension = ''): void
+    public function recordHangup(string $channel): void
     {
-        CallLog::where('channel', $channel)->update([
-            'status'   => 'ended',
-            'cause'    => $cause,
-            'duration' => $duration,
-            'ended_at' => now(),
-        ]);
-
-        event(new CallEndedEvent($channel, $cause, $duration, $extension));
+        $this->hangupCalls[] = compact('channel');
     }
 
-    /** Simulate a missed call */
-    public static function simulateMissedCall(string $caller, string $extension): void
+    public function recordCampaignAction(string $action, array $data = []): void
     {
-        static::simulateIncomingCall($caller, $extension);
-        $channel = 'PJSIP/' . $extension . '-' . uniqid();
-        static::simulateCallEnded($channel, 'NO_ANSWER', 0, $extension);
+        $this->campaignActions[] = compact('action', 'data');
     }
 
-    // ─────────────────────────────────────────
-    // RECORD & ASSERT
-    // ─────────────────────────────────────────
+    // ── Configuration ────────────────────────────────────────────────────
 
-    public static function recordOriginate(string $from, string $to): void
+    public function failOnNextCall(): static
     {
-        static::$originatedCalls[] = ['from' => $from, 'to' => $to, 'at' => now()];
+        $this->shouldFail = true;
+        return $this;
     }
 
-    public static function recordTransfer(string $channel, string $extension): void
+    public function willFail(): bool
     {
-        static::$transferredCalls[] = ['channel' => $channel, 'extension' => $extension, 'at' => now()];
+        $fail = $this->shouldFail;
+        $this->shouldFail = false;
+        return $fail;
     }
 
-    public static function recordHangup(string $channel): void
+    public function fakeActiveCalls(array $calls = []): array
     {
-        static::$hungupChannels[] = ['channel' => $channel, 'at' => now()];
+        return $calls;
     }
 
-    public static function assertOriginated(string $from, string $to): void
+    // ── Assertions ───────────────────────────────────────────────────────
+
+    public function assertOriginated(string $from, string $to): void
     {
-        $found = collect(static::$originatedCalls)->first(fn($c) => $c['from'] === $from && $c['to'] === $to);
-        assert($found !== null, "Expected call from {$from} to {$to} was not originated.");
+        $match = collect($this->originateCalls)->first(
+            fn($c) => $c['from'] === $from && $c['to'] === $to
+        );
+        \PHPUnit\Framework\Assert::assertNotNull(
+            $match,
+            "Expected originate call from [{$from}] to [{$to}] was not made.\nActual calls: " . json_encode($this->originateCalls)
+        );
     }
 
-    public static function assertNotOriginated(string $from, string $to): void
+    public function assertNotOriginated(string $from, string $to): void
     {
-        $found = collect(static::$originatedCalls)->first(fn($c) => $c['from'] === $from && $c['to'] === $to);
-        assert($found === null, "Call from {$from} to {$to} was originated but was not expected.");
+        $match = collect($this->originateCalls)->first(
+            fn($c) => $c['from'] === $from && $c['to'] === $to
+        );
+        \PHPUnit\Framework\Assert::assertNull(
+            $match,
+            "Unexpected originate call from [{$from}] to [{$to}] was made."
+        );
     }
 
-    public static function assertCallCount(int $expected): void
+    public function assertOriginateCount(int $count): void
     {
-        $actual = count(static::$originatedCalls);
-        assert($actual === $expected, "Expected {$expected} calls originated, got {$actual}.");
+        \PHPUnit\Framework\Assert::assertCount($count, $this->originateCalls);
     }
 
-    public static function assertTransferred(string $channel, string $extension): void
+    public function assertTransferred(string $channel, string $to): void
     {
-        $found = collect(static::$transferredCalls)->first(fn($c) => $c['channel'] === $channel && $c['extension'] === $extension);
-        assert($found !== null, "Expected transfer of {$channel} to {$extension} did not happen.");
+        $match = collect($this->transferCalls)->first(
+            fn($c) => $c['channel'] === $channel && $c['to'] === $to
+        );
+        \PHPUnit\Framework\Assert::assertNotNull($match,
+            "Expected transfer of [{$channel}] to [{$to}] was not made."
+        );
     }
 
-    public static function assertHungUp(string $channel): void
+    public function assertHungUp(string $channel): void
     {
-        $found = collect(static::$hungupChannels)->first(fn($c) => $c['channel'] === $channel);
-        assert($found !== null, "Expected hangup of {$channel} did not happen.");
+        $match = collect($this->hangupCalls)->first(fn($c) => $c['channel'] === $channel);
+        \PHPUnit\Framework\Assert::assertNotNull($match,
+            "Expected hangup of [{$channel}] was not made."
+        );
     }
 
-    public static function assertNothingOriginated(): void
+    public function assertNothingOriginated(): void
     {
-        assert(empty(static::$originatedCalls), 'Expected no calls to be originated, but ' . count(static::$originatedCalls) . ' were.');
+        \PHPUnit\Framework\Assert::assertEmpty($this->originateCalls, 'No calls should have been originated.');
     }
 
-    public static function assertIncomingCallFired(string $caller, string $extension): void
+    public function assertCampaignStarted(): void
     {
-        Event::assertDispatched(IncomingCallEvent::class, fn($e) => $e->callerNumber === $caller && $e->extension === $extension);
+        $started = collect($this->campaignActions)->where('action', 'start')->isNotEmpty();
+        \PHPUnit\Framework\Assert::assertTrue($started, 'Expected a campaign to be started.');
     }
 
-    public static function assertCallEndedFired(string $channel): void
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    public function getOriginateCalls(): array { return $this->originateCalls; }
+    public function getTransferCalls(): array  { return $this->transferCalls; }
+    public function getHangupCalls(): array    { return $this->hangupCalls; }
+
+    public function reset(): void
     {
-        Event::assertDispatched(CallEndedEvent::class, fn($e) => $e->channel === $channel);
+        $this->originateCalls  = [];
+        $this->transferCalls   = [];
+        $this->hangupCalls     = [];
+        $this->campaignActions = [];
+        $this->shouldFail      = false;
+    }
+}
+
+/**
+ * Fake RestApiService used internally by MikoPBXFake.
+ */
+class FakeRestApiService extends \BitDreamIT\MikoPBX\Services\RestApiService
+{
+    public function __construct(private MikoPBXFake $fake)
+    {
+        // Skip parent constructor — no HTTP needed
     }
 
-    // ─────────────────────────────────────────
-    // FACTORIES / HELPERS
-    // ─────────────────────────────────────────
-
-    public static function makeCallLog(array $overrides = []): CallLog
+    public function originate(string $from, string $to, array $opts = []): array
     {
-        return CallLog::create(array_merge([
-            'caller'     => '017' . rand(10000000, 99999999),
-            'extension'  => '10' . rand(1, 9),
-            'channel'    => 'PJSIP/101-' . uniqid(),
-            'direction'  => 'inbound',
-            'status'     => 'answered',
-            'duration'   => rand(30, 300),
-            'started_at' => now()->subMinutes(rand(1, 60)),
-            'ended_at'   => now(),
-        ], $overrides));
+        $this->fake->recordOriginate($from, $to);
+        return ['success' => true];
     }
 
-    public static function makeMissedCallLog(array $overrides = []): CallLog
+    public function transfer(string $channel, string $to, string $context = 'from-internal'): array
     {
-        return static::makeCallLog(array_merge(['status' => 'missed', 'duration' => 0, 'ended_at' => null], $overrides));
+        $this->fake->recordTransfer($channel, $to);
+        return ['success' => true];
     }
+
+    public function hangup(string $channel): array
+    {
+        $this->fake->recordHangup($channel);
+        return ['success' => true];
+    }
+
+    public function getActiveCalls(): array    { return ['data' => []]; }
+    public function getExtensions(): array     { return ['data' => []]; }
+    public function getCDR(string $f, string $t, array $filters = []): array { return ['data' => []]; }
+    public function getExtensionStatuses(): array { return ['data' => []]; }
+    public function createDialerTask(array $d): array { $this->fake->recordCampaignAction('create', $d); return ['id' => 1]; }
+    public function startDialerTask(int $id): array   { $this->fake->recordCampaignAction('start', ['id' => $id]); return ['success' => true]; }
+    public function stopDialerTask(int $id): array    { $this->fake->recordCampaignAction('stop',  ['id' => $id]); return ['success' => true]; }
+    public function pauseDialerTask(int $id): array   { $this->fake->recordCampaignAction('pause', ['id' => $id]); return ['success' => true]; }
+    public function getSystemInfo(): array { return ['data' => ['version' => 'fake']]; }
+    public function getTrunkStatus(): array { return ['data' => [['state' => 'Registered']]]; }
 }

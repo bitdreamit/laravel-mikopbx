@@ -2,6 +2,7 @@
 
 namespace BitDreamIT\MikoPBX\Events;
 
+use BitDreamIT\MikoPBX\Models\CallLog;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
@@ -12,34 +13,23 @@ class IncomingCallEvent implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
-    public function __construct(
-        public readonly string  $callerNumber,
-        public readonly string  $extension,
-        public readonly string  $channel,
-        public readonly ?string $callerName = null,
-    ) {}
+    public function __construct(public CallLog $callLog) {}
 
-    public function broadcastOn(): array
+    public function broadcastOn(): Channel
     {
-        return [
-            new Channel('mikopbx.extension.' . $this->extension),
-            new Channel('mikopbx.calls'),
-        ];
+        return new Channel('mikopbx.calls');
     }
 
-    public function broadcastAs(): string
-    {
-        return 'call.incoming';
-    }
+    public function broadcastAs(): string { return 'incoming'; }
 
     public function broadcastWith(): array
     {
         return [
-            'caller_number' => $this->callerNumber,
-            'caller_name'   => $this->callerName,
-            'extension'     => $this->extension,
-            'channel'       => $this->channel,
-            'timestamp'     => now()->toISOString(),
+            'id'        => $this->callLog->id,
+            'caller'    => $this->callLog->caller,
+            'extension' => $this->callLog->extension,
+            'channel'   => $this->callLog->channel,
+            'started_at'=> $this->callLog->started_at?->toIso8601String(),
         ];
     }
 }

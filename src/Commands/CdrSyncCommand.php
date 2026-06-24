@@ -3,38 +3,49 @@
 namespace BitDreamIT\MikoPBX\Commands;
 
 use Illuminate\Console\Command;
-use BitDreamIT\MikoPBX\Facades\MikoPBX;
-use BitDreamIT\MikoPBX\Models\CdrSync;
+use BitDreamIT\MikoPBX\Services\RestApiService;
+use BitDreamIT\MikoPBX\Models\CallLog;
 
 class CdrSyncCommand extends Command
 {
-    protected $signature   = 'mikopbx:cdr-sync {--from= : Date from (Y-m-d)} {--to= : Date to (Y-m-d)}';
-    protected $description = 'Sync CDR records from MikoPBX to local database';
+    protected $signature   = 'mikopbx:cdr-sync {--days=1 : How many days back to sync}';
+    protected $description = 'Sync CDR (call logs) from MikoPBX into local database';
 
-    public function handle(): int
+    public function handle(RestApiService $api): int
     {
-        $from = $this->option('from') ?? today()->toDateString();
-        $to   = $this->option('to')   ?? today()->toDateString();
-        $this->info("Syncing CDR from $from to $to...");
+        $days = (int) $this->option('days');
+        $from = now()->subDays($days)->format('Y-m-d 00:00:00');
+        $to   = now()->format('Y-m-d 23:59:59');
+
+        $this->info("Syncing CDR from {$from} to {$to}...");
+
         try {
-            $data = MikoPBX::call()->getRecordings($from, $to)['data'] ?? [];
-            $this->info('Found ' . count($data) . ' records.');
-            $bar = $this->output->createProgressBar(count($data));
-            $bar->start();
-            foreach ($data as $record) {
-                \BitDreamIT\MikoPBX\Models\CdrSync::updateOrCreate(
-                    ['uniqueid' => $record['uniqueid'] ?? uniqid()],
-                    ['src' => $record['src'] ?? '', 'dst' => $record['dst'] ?? '', 'duration' => $record['duration'] ?? 0, 'billsec' => $record['billsec'] ?? 0, 'disposition' => $record['disposition'] ?? '', 'recordingfile' => $record['recordingfile'] ?? '', 'calldate' => $record['calldate'] ?? now()]
+            $records = $api->getCDR($from, $to)['data'] ?? [];
+            $count = 0;
+
+            foreach ($records as $rec) {
+                CallLog::updateOrCreate(
+                    ['uniqueid' => $rec['uniqueid'] ?? $rec['id'] ?? null],
+                    [
+                        'caller'       => $rec['src']        ?? $rec['caller'] ?? '',
+                        'callee'       => $rec['dst']        ?? $rec['callee'] ?? '',
+                        'extension'    => $rec['dstchannel'] ?? $rec['extension'] ?? '',
+                        'direction'    => $rec['direction']  ?? 'inbound',
+                        'status'       => $rec['disposition'] ?? $rec['status'] ?? 'ended',
+                        'duration'     => $rec['duration']   ?? 0,
+                        'billsec'      => $rec['billsec']    ?? 0,
+                        'started_at'   => $rec['calldate']   ?? $rec['started_at'] ?? null,
+                    ]
                 );
-                $bar->advance();
+                $count++;
             }
-            $bar->finish();
-            $this->newLine();
-            $this->info('CDR sync complete!');
+
+            $this->info("✅ Synced {$count} records.");
         } catch (\Throwable $e) {
-            $this->error('CDR sync failed: ' . $e->getMessage());
-            return self::FAILURE;
+            $this->error("❌ Sync failed: {$e->getMessage()}");
+            return 1;
         }
-        return self::SUCCESS;
+
+        return 0;
     }
 }

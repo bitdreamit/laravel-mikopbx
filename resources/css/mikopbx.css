@@ -1,0 +1,79 @@
+/*
+ * bitdreamit/laravel-mikopbx — custom CSS
+ * Complements Tailwind utility classes already in the Blade layout.
+ * Publish: php artisan vendor:publish --tag=mikopbx-assets
+ */
+
+/* ── Animations ───────────────────────────────────────────── */
+@keyframes pulseGreen {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+}
+.pulse-green { animation: pulseGreen 1.8s ease-in-out infinite; }
+
+@keyframes slideInRight {
+    from { transform: translateX(100%); opacity: 0; }
+    to   { transform: translateX(0);    opacity: 1; }
+}
+.slide-in-right { animation: slideInRight 0.3s ease-out; }
+
+@keyframes ringBounce {
+    0%, 100% { transform: rotate(-15deg); }
+    50%       { transform: rotate(15deg); }
+}
+.ring-bounce { animation: ringBounce 0.4s ease-in-out infinite; }
+
+/* ── Waveform bars ───────────────────────────────────────── */
+.waveform-bar {
+    display: inline-block;
+    width: 3px;
+    border-radius: 2px;
+    background: #6366f1;
+    animation: wavePulse 1s ease-in-out infinite;
+}
+.waveform-bar:nth-child(2) { animation-delay: 0.1s; }
+.waveform-bar:nth-child(3) { animation-delay: 0.2s; }
+.waveform-bar:nth-child(4) { animation-delay: 0.3s; }
+.waveform-bar:nth-child(5) { animation-delay: 0.4s; }
+
+@keyframes wavePulse {
+    0%, 100% { transform: scaleY(0.4); }
+    50%       { transform: scaleY(1.0); }
+}
+
+/* ── Dialer keypad hover ─────────────────────────────────── */
+.dialer-key:active { transform: scale(0.93); }
+
+/* ── IVR builder node connector ──────────────────────────── */
+.ivr-connector {
+    border-left: 2px dashed #d1d5db;
+    margin-left: 1.5rem;
+    padding-left: 1.5rem;
+}
+
+/* ── Status dots ─────────────────────────────────────────── */
+.dot-online  { background-color: #4ade80; }
+.dot-busy    { background-color: #fb923c; }
+.dot-dnd     { background-color: #f87171; }
+.dot-away    { background-color: #facc15; }
+.dot-offline { background-color: #d1d5db; }
+
+/* ── Scrollbar custom for call board ────────────────────── */
+.call-board-scroll::-webkit-scrollbar        { width: 4px; }
+.call-board-scroll::-webkit-scrollbar-track  { background: #f1f5f9; }
+.call-board-scroll::-webkit-scrollbar-thumb  { background: #cbd5e1; border-radius: 2px; }
+
+/* ── Audio player in recordings ─────────────────────────── */
+audio::-webkit-media-controls-panel          { background-color: #f8fafc; }
+audio::-webkit-media-controls-play-button    { background-color: #6366f1; border-radius: 50%; }
+
+/* ── Campaign progress bar animate ──────────────────────── */
+.progress-bar-animated {
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #6366f1);
+    background-size: 200% 100%;
+    animation: progressShimmer 2s linear infinite;
+}
+@keyframes progressShimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}

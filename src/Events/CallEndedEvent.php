@@ -2,6 +2,7 @@
 
 namespace BitDreamIT\MikoPBX\Events;
 
+use BitDreamIT\MikoPBX\Models\CallLog;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
@@ -12,34 +13,24 @@ class CallEndedEvent implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
-    public function __construct(
-        public readonly string $channel,
-        public readonly string $cause,
-        public readonly int    $duration,
-        public readonly string $extension,
-    ) {}
+    public function __construct(public CallLog $callLog) {}
 
-    public function broadcastOn(): array
+    public function broadcastOn(): Channel
     {
-        return [
-            new Channel('mikopbx.extension.' . $this->extension),
-            new Channel('mikopbx.calls'),
-        ];
+        return new Channel('mikopbx.calls');
     }
 
-    public function broadcastAs(): string
-    {
-        return 'call.ended';
-    }
+    public function broadcastAs(): string { return 'ended'; }
 
     public function broadcastWith(): array
     {
         return [
-            'channel'   => $this->channel,
-            'cause'     => $this->cause,
-            'duration'  => $this->duration,
-            'extension' => $this->extension,
-            'timestamp' => now()->toISOString(),
+            'id'       => $this->callLog->id,
+            'caller'   => $this->callLog->caller,
+            'extension'=> $this->callLog->extension,
+            'status'   => $this->callLog->status,
+            'duration' => $this->callLog->duration_formatted,
+            'cause'    => $this->callLog->cause,
         ];
     }
 }

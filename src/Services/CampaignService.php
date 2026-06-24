@@ -4,144 +4,159 @@ namespace BitDreamIT\MikoPBX\Services;
 
 use BitDreamIT\MikoPBX\Models\Campaign;
 use BitDreamIT\MikoPBX\Models\CampaignNumber;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Http\UploadedFile;
 
 class CampaignService
 {
-    public function __construct(
-        private RestApiService $api,
-        private array $config
-    ) {}
+    public function __construct(private RestApiService $api) {}
 
-    // ─────────────────────────────────────────
-    // CREATE CAMPAIGN
-    // ─────────────────────────────────────────
+    /** Create campaign in DB and push to MikoPBX */
+    public function create(array $data, array $numbers, UploadedFile|string|null $audio = null): Campaign
+    {
+        return DB::transaction(function () use ($data, $numbers, $audio) {
 
-    public function create(
-        string $name,
-        array  $numbers,
-        string $audioFile,
-        int    $maxChannels = 5,
-        array  $ivrOptions  = []
-    ): Campaign {
-
-        // 1. Upload audio file to MikoPBX
-        $audioResponse = $this->api->uploadAudio($audioFile);
-        $audioId       = $audioResponse['data']['id'] ?? null;
-
-        // 2. Create IVR polling script if options provided
-        $pollingId = null;
-        if (!empty($ivrOptions)) {
-            $pollingResponse = $this->api->createPolling([
-                'name'      => $name . ' IVR',
-                'questions' => $ivrOptions,
+            $campaign = Campaign::create([
+                'name'              => $data['name'],
+                'type'              => $data['type'] ?? 'agent_connect',
+                'status'            => 'draft',
+                'max_channels'      => $data['max_channels'] ?? 5,
+                'retry_attempts'    => $data['retry_attempts'] ?? 3,
+                'retry_delay'       => $data['retry_delay'] ?? 300,
+                'dial_timeout'      => $data['dial_timeout'] ?? 30,
+                'caller_id'         => $data['caller_id'] ?? null,
+                'destination_extension' => $data['destination_extension'] ?? null,
+                'scheduled_at'      => $data['scheduled_at'] ?? null,
+                'created_by'        => auth()->id(),
+                'total_numbers'     => count($numbers),
             ]);
-            $pollingId = $pollingResponse['data']['id'] ?? null;
-        }
 
-        // 3. Create campaign on MikoPBX
-        $taskData = [
-            'name'             => $name,
-            'state'            => 0,
-            'innerNumType'     => $pollingId ? 'polling' : 'audio',
-            'innerNum'         => $pollingId ?? $audioId,
-            'maxCountChannels' => $maxChannels,
-            'numbers'          => collect($numbers)
-                                    ->map(fn($n) => ['number' => $n])
-                                    ->toArray(),
-        ];
-
-        $taskResponse = $this->api->createDialerTask($taskData);
-        $mikoPBXId    = $taskResponse['data']['id'] ?? null;
-
-        // 4. Save to local DB
-        $campaign = Campaign::create([
-            'name'            => $name,
-            'mikopbx_task_id' => $mikoPBXId,
-            'audio_file'      => $audioFile,
-            'max_channels'    => $maxChannels,
-            'status'          => 'created',
-            'total_numbers'   => count($numbers),
-        ]);
-
-        // 5. Save numbers
-        foreach ($numbers as $number) {
-            CampaignNumber::create([
+            // Bulk insert numbers
+            $rows = array_map(fn($n) => [
                 'campaign_id' => $campaign->id,
-                'number'      => $number,
+                'number'      => is_array($n) ? $n['number'] : $n,
+                'name'        => is_array($n) ? ($n['name'] ?? null) : null,
                 'status'      => 'pending',
-            ]);
-        }
+                'created_at'  => now(),
+                'updated_at'  => now(),
+            ], $numbers);
 
-        return $campaign;
+            CampaignNumber::insert($rows);
+
+            // Upload audio if provided
+            if ($audio) {
+                $path = is_string($audio) ? $audio : $audio->getPathname();
+                $result = $this->api->uploadAudio($path);
+                $campaign->update(['audio_file' => $result['filename'] ?? null]);
+            }
+
+            return $campaign;
+        });
     }
 
-    // ─────────────────────────────────────────
-    // START / STOP
-    // ─────────────────────────────────────────
-
+    /** Start a campaign — push task to MikoPBX */
     public function start(Campaign $campaign): Campaign
     {
-        $this->api->startDialerTask($campaign->mikopbx_task_id);
-        $campaign->update(['status' => 'running', 'started_at' => now()]);
-        return $campaign->refresh();
+        $numbers = $campaign->numbers()
+            ->where('status', 'pending')
+            ->select('number')
+            ->get()
+            ->map(fn($n) => ['number' => $n->number])
+            ->toArray();
+
+        $taskData = [
+            'name'             => $campaign->name,
+            'state'            => 0,
+            'innerNumType'     => $campaign->type === 'voice_broadcast' ? 'audio' : 'polling',
+            'maxCountChannels' => $campaign->max_channels,
+            'dialPrefix'       => '',
+            'numbers'          => $numbers,
+        ];
+
+        if ($campaign->destination_extension) {
+            $taskData['innerNum'] = $campaign->destination_extension;
+        }
+
+        $result = $this->api->createDialerTask($taskData);
+        $taskId = $result['id'] ?? $result['data']['id'] ?? null;
+
+        if ($taskId) {
+            $this->api->startDialerTask((int) $taskId);
+        }
+
+        $campaign->update([
+            'mikopbx_task_id' => $taskId,
+            'status'          => 'running',
+            'started_at'      => now(),
+        ]);
+
+        return $campaign->fresh();
+    }
+
+    public function pause(Campaign $campaign): Campaign
+    {
+        if ($campaign->mikopbx_task_id) {
+            $this->api->pauseDialerTask($campaign->mikopbx_task_id);
+        }
+        $campaign->update(['status' => 'paused']);
+        return $campaign->fresh();
     }
 
     public function stop(Campaign $campaign): Campaign
     {
-        $this->api->stopDialerTask($campaign->mikopbx_task_id);
-        $campaign->update(['status' => 'stopped', 'stopped_at' => now()]);
-        return $campaign->refresh();
+        if ($campaign->mikopbx_task_id) {
+            $this->api->stopDialerTask($campaign->mikopbx_task_id);
+        }
+        $campaign->update(['status' => 'completed', 'completed_at' => now()]);
+        return $campaign->fresh();
     }
 
-    // ─────────────────────────────────────────
-    // STATUS
-    // ─────────────────────────────────────────
-
-    public function status(Campaign $campaign): array
+    /** Sync campaign progress from MikoPBX */
+    public function syncProgress(Campaign $campaign): array
     {
-        $remote = $this->api->getDialerTaskStatus($campaign->mikopbx_task_id);
+        if (! $campaign->mikopbx_task_id) return [];
 
-        // Sync status to local DB
+        $status = $this->api->getDialerTaskStatus($campaign->mikopbx_task_id);
+
         $campaign->update([
-            'status'          => $remote['data']['state'] ?? $campaign->status,
-            'dialed_count'    => $remote['data']['dialed'] ?? $campaign->dialed_count,
-            'answered_count'  => $remote['data']['answered'] ?? $campaign->answered_count,
+            'dialed'   => $status['dialed']   ?? $campaign->dialed,
+            'answered' => $status['answered']  ?? $campaign->answered,
+            'failed'   => $status['failed']    ?? $campaign->failed,
         ]);
 
+        return $status;
+    }
+
+    /** Parse CSV/text file into number array */
+    public function parseNumbersFromFile(UploadedFile $file): array
+    {
+        $numbers = [];
+        $content = file($file->getPathname(), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
+        foreach ($content as $line) {
+            $parts  = str_getcsv($line);
+            $number = preg_replace('/\D/', '', trim($parts[0] ?? ''));
+            $name   = trim($parts[1] ?? '');
+
+            if (strlen($number) >= 7) {
+                $numbers[] = ['number' => $number, 'name' => $name ?: null];
+            }
+        }
+
+        return $numbers;
+    }
+
+    public function getStats(Campaign $campaign): array
+    {
+        $total = $campaign->total_numbers ?: 1;
         return [
-            'campaign' => $campaign->fresh(),
-            'remote'   => $remote,
+            'total'    => $campaign->total_numbers,
+            'dialed'   => $campaign->dialed,
+            'answered' => $campaign->answered,
+            'failed'   => $campaign->failed,
+            'pending'  => $campaign->total_numbers - $campaign->dialed,
+            'progress' => round(($campaign->dialed / $total) * 100, 1),
+            'asr'      => $campaign->dialed > 0 ? round(($campaign->answered / $campaign->dialed) * 100, 1) : 0,
         ];
-    }
-
-    // ─────────────────────────────────────────
-    // SIMPLE VOICE BROADCAST (no IVR)
-    // ─────────────────────────────────────────
-
-    public function broadcast(string $name, array $numbers, string $audioFile, int $maxChannels = 5): Campaign
-    {
-        return $this->create($name, $numbers, $audioFile, $maxChannels, []);
-    }
-
-    // ─────────────────────────────────────────
-    // CAMPAIGN WITH IVR (Press 1 / Press 2)
-    // ─────────────────────────────────────────
-
-    public function withIVR(string $name, array $numbers, string $audioFile, array $keypressActions): Campaign
-    {
-        $ivrOptions = [
-            [
-                'questionId'   => '1',
-                'questionText' => 'main',
-                'press'        => collect($keypressActions)
-                    ->map(fn($action, $key) => [
-                        'key'    => (string) $key,
-                        'action' => $action['action'],
-                        'value'  => $action['value'],
-                    ])->values()->toArray(),
-            ]
-        ];
-
-        return $this->create($name, $numbers, $audioFile, 5, $ivrOptions);
     }
 }

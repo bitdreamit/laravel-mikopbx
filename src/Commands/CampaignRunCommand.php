@@ -3,34 +3,44 @@
 namespace BitDreamIT\MikoPBX\Commands;
 
 use Illuminate\Console\Command;
-use BitDreamIT\MikoPBX\Models\Campaign;
 use BitDreamIT\MikoPBX\Services\CampaignService;
+use BitDreamIT\MikoPBX\Models\Campaign;
 
 class CampaignRunCommand extends Command
 {
-    protected $signature   = 'mikopbx:campaign {action : start|stop|status} {id : Campaign ID}';
-    protected $description = 'Manage MikoPBX campaigns from CLI';
+    protected $signature   = 'mikopbx:campaign-run {--sync : Sync progress of running campaigns}';
+    protected $description = 'Start scheduled campaigns or sync progress of running ones';
 
-    public function handle(CampaignService $campaign): int
+    public function handle(CampaignService $svc): int
     {
-        $model = Campaign::find($this->argument('id'));
-        if (!$model) { $this->error('Campaign #' . $this->argument('id') . ' not found'); return self::FAILURE; }
-        match ($this->argument('action')) {
-            'start'  => [$campaign->start($model),  $this->info("Campaign [{$model->name}] started!")],
-            'stop'   => [$campaign->stop($model),   $this->info("Campaign [{$model->name}] stopped!")],
-            'status' => $this->showStatus($campaign, $model),
-            default  => $this->error("Unknown action: " . $this->argument('action')),
-        };
-        return self::SUCCESS;
-    }
+        if ($this->option('sync')) {
+            Campaign::where('status', 'running')->each(function ($c) use ($svc) {
+                $status = $svc->syncProgress($c);
+                $this->line("📊 Campaign [{$c->name}] progress: {$c->fresh()->progress}%");
+            });
+            return 0;
+        }
 
-    private function showStatus(CampaignService $svc, Campaign $c): void
-    {
-        $svc->status($c);
-        $this->table(['Field','Value'], [
-            ['Name', $c->name], ['Status', $c->status],
-            ['Total', $c->total_numbers], ['Dialed', $c->dialed_count],
-            ['Answered', $c->answered_count], ['Started', $c->started_at],
-        ]);
+        // Start campaigns scheduled for now
+        $due = Campaign::where('status', 'draft')
+            ->where('scheduled_at', '<=', now())
+            ->whereNotNull('scheduled_at')
+            ->get();
+
+        foreach ($due as $campaign) {
+            $this->info("▶ Starting campaign: {$campaign->name}");
+            try {
+                $svc->start($campaign);
+                $this->info("  ✅ Started (MikoPBX task #{$campaign->fresh()->mikopbx_task_id})");
+            } catch (\Throwable $e) {
+                $this->error("  ❌ Failed: {$e->getMessage()}");
+            }
+        }
+
+        if ($due->isEmpty()) {
+            $this->info('No scheduled campaigns due.');
+        }
+
+        return 0;
     }
 }
