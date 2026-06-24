@@ -2,7 +2,7 @@
 
 All notable changes to `bitdreamit/laravel-mikopbx` will be documented in this file.
 
-## [1.0.0] — 2026-06-24
+## [1.0.1] — 2026-06-24
 
 ### Added — Initial Release 🎉
 
