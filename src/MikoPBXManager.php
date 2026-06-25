@@ -14,15 +14,22 @@ use BitDreamIT\MikoPBX\Services\{
  * MikoPBXManager — central access point for all services.
  *
  * Usage:
- *   MikoPBX::call()->originate('101', '01711000000');
- *   MikoPBX::campaign()->create([...]);
- *   MikoPBX::agent()->all();
+ *   MikoPBX::api()->getActiveCalls();            // REST API v3
+ *   MikoPBX::ami()->originate('101', '017...');  // AMI (call control)
+ *   MikoPBX::campaign()->create([...]);           // Campaign service
+ *   MikoPBX::agent()->all();                      // Agent service
+ *
+ * IMPORTANT — call control goes through AMI, not REST API:
+ *   originate()  → AMI Action: Originate
+ *   transfer()   → AMI Action: Redirect
+ *   hangup()     → AMI Action: Hangup
+ *   mute()       → AMI Action: MuteAudio
  */
 class MikoPBXManager
 {
     public function __construct(protected Application $app) {}
 
-    public function api(): RestApiService       { return $this->app->make(RestApiService::class); }
+    public function api(): RestApiService        { return $this->app->make(RestApiService::class); }
     public function ami(): AMIService            { return $this->app->make(AMIService::class); }
     public function ari(): ARIService            { return $this->app->make(ARIService::class); }
     public function campaign(): CampaignService  { return $this->app->make(CampaignService::class); }
@@ -37,27 +44,59 @@ class MikoPBXManager
     public function sms(): SmsService            { return $this->app->make(SmsService::class); }
     public function dialer(): WebDialerService   { return $this->app->make(WebDialerService::class); }
 
-    // Convenience shortcuts
+    // ── Convenience shortcuts ─────────────────────────────────────────────────
+    // All call control uses AMI (REST API v3 has no originate/transfer/hangup)
+
+    /**
+     * Originate a call from an extension to a number.
+     * Connects to AMI, originates, disconnects.
+     */
     public function originate(string $from, string $to): array
     {
-        return $this->api()->originate($from, $to);
+        $ami = $this->ami();
+        $ami->connect();
+        $result = $ami->originate($from, $to);
+        $ami->disconnect();
+        return $result;
     }
 
-    public function transfer(string $channel, string $to): array
+    /**
+     * Transfer an active channel to another extension.
+     */
+    public function transfer(string $channel, string $to, string $context = 'from-internal'): array
     {
-        return $this->api()->transfer($channel, $to);
+        $ami = $this->ami();
+        $ami->connect();
+        $result = $ami->redirect($channel, $to, $context);
+        $ami->disconnect();
+        return $result;
     }
 
+    /**
+     * Hangup an active channel.
+     */
     public function hangup(string $channel): array
     {
-        return $this->api()->hangup($channel);
+        $ami = $this->ami();
+        $ami->connect();
+        $result = $ami->hangup($channel);
+        $ami->disconnect();
+        return $result;
     }
 
+    /**
+     * Get all currently active calls (REST API v3).
+     * Endpoint: GET /pbxcore/api/v3/pbx-status:getActiveCalls
+     */
     public function activeCalls(): array
     {
         return $this->api()->getActiveCalls();
     }
 
+    /**
+     * Get extensions as {value, text} list (REST API v3).
+     * Endpoint: GET /pbxcore/api/v3/extensions:getForSelect
+     */
     public function extensions(): array
     {
         return $this->api()->getExtensions();
