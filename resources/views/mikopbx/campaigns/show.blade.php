@@ -96,7 +96,7 @@
                         <td class="px-4 py-2 text-xs text-gray-600">{{ $num->name ?? '—' }}</td>
                         <td class="px-4 py-2">
                             <span class="badge text-xs
-                                @switch($num->status)
+                                @match($num->status)
                                     @case('answered')  bg-green-50 text-green-700 @break
                                     @case('no_answer') bg-yellow-50 text-yellow-700 @break
                                     @case('busy')      bg-orange-50 text-orange-700 @break
@@ -104,7 +104,7 @@
                                     @case('opted_out') bg-gray-100 text-gray-600 @break
                                     @case('dialing')   bg-blue-50 text-blue-700 @break
                                     @default           bg-gray-50 text-gray-500
-                                @endswitch">
+                                @endmatch">
                                 {{ ucfirst(str_replace('_',' ',$num->status)) }}
                             </span>
                         </td>

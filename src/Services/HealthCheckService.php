@@ -40,20 +40,15 @@ class HealthCheckService
         } catch (\Throwable) {}
 
         // 3. SIP trunk registration — GET /pbxcore/api/v3/sip-providers:getStatuses
-	    try {
-		    $trunk = $this->api->getTrunkStatus();
-		    $data  = $trunk['data'] ?? [];
+        try {
+            $trunk = $this->api->getTrunkStatus();
+            $data  = $trunk['data'] ?? [];
 
-		    // data has 'sip' and 'iax' keys, each containing trunk objects
-		    $allTrunks = array_merge(
-			    array_values($data['sip'] ?? []),
-			    array_values($data['iax'] ?? [])
-		    );
-
-		    $sipOk = collect($allTrunks)->contains(
-			    fn($t) => strtoupper($t['state'] ?? '') === 'REGISTERED'
-		    );
-	    } catch (\Throwable) {}
+            // Each item has: id, state (REGISTERED|UNREGISTERED|FAILED|...)
+            $sipOk = collect($data)->contains(
+                fn($t) => strtoupper($t['state'] ?? '') === 'REGISTERED'
+            );
+        } catch (\Throwable) {}
 
         // 4. Active calls count — GET /pbxcore/api/v3/pbx-status:getActiveCalls
         try {

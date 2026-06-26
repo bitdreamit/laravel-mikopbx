@@ -48,13 +48,13 @@
                         </td>
                         <td class="px-4 py-3">
                             <span class="badge
-                                @switch($call->status)
+                                @match($call->status)
                                     @case('answered') bg-green-50 text-green-700 @break
                                     @case('missed')   bg-red-50 text-red-700 @break
                                     @case('busy')     bg-orange-50 text-orange-700 @break
                                     @case('failed')   bg-red-100 text-red-800 @break
                                     @default          bg-gray-100 text-gray-600
-                                @endswitch">
+                                @endmatch">
                                 {{ ucfirst($call->status) }}
                             </span>
                         </td>

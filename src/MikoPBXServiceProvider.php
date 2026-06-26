@@ -66,9 +66,9 @@ class MikoPBXServiceProvider extends ServiceProvider
             __DIR__.'/../database/migrations' => database_path('migrations'),
         ], 'mikopbx-migrations');
 
-	    $this->publishes([
-		    __DIR__.'/../resources/views/mikopbx' => resource_path('views/vendor/mikopbx'),
-	    ], 'mikopbx-views');
+        $this->publishes([
+            __DIR__.'/../resources/views' => resource_path('views/vendor/mikopbx'),
+        ], 'mikopbx-views');
 
         $this->publishes([
             __DIR__.'/../resources/js'  => resource_path('js/mikopbx'),
@@ -104,7 +104,7 @@ class MikoPBXServiceProvider extends ServiceProvider
 
     protected function registerViews(): void
     {
-	    $this->loadViewsFrom(__DIR__.'/../resources/views/mikopbx', 'mikopbx');
+        $this->loadViewsFrom(__DIR__.'/../resources/views', 'mikopbx');
     }
 
     protected function registerMigrations(): void
