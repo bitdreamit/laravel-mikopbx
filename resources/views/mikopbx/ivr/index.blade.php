@@ -27,6 +27,9 @@
                 </div>
                 <span class="text-2xl">🌿</span>
             </div>
+            <div class="mt-4">
+                <a href="{{ route('mikopbx.ivr.builder') }}" class="btn-secondary text-xs">Edit</a>
+            </div>
         </div>
         @endforeach
     </div>

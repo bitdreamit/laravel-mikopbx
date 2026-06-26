@@ -1,4 +1,5 @@
-<div class="bg-white rounded-xl shadow-sm border border-gray-100" wire:poll.{{ $pollInterval }}s="refresh">
+<div class="bg-white rounded-xl shadow-sm border border-gray-100"
+     wire:poll.{{ $pollInterval }}s="refresh">
     <div class="border-b border-gray-100 px-4 py-3 flex items-center justify-between">
         <h3 class="font-semibold text-gray-900 text-sm flex items-center gap-2">
             <span class="w-2 h-2 bg-green-400 rounded-full pulse-green"></span>
@@ -8,39 +9,44 @@
     </div>
 
     @if(count($activeCalls) === 0)
-        <div class="px-4 py-8 text-center text-xs text-gray-400">No active calls right now</div>
+        <div class="px-4 py-8 text-center text-xs text-gray-400">
+            No active calls right now
+        </div>
     @else
         <div class="divide-y divide-gray-50 max-h-64 overflow-y-auto">
             @foreach($activeCalls as $call)
+            @php
+                $caller  = $call['src_num'] ?? $call['src'] ?? $call['caller'] ?? 'Unknown';
+                $exten   = $call['dst_num'] ?? $call['dst'] ?? $call['extension'] ?? '—';
+                $dur     = $call['duration'] ?? '0:00';
+                $state   = $call['state'] ?? $call['status'] ?? 'Active';
+                $channel = $call['channel'] ?? $call['src_chan'] ?? '';
+            @endphp
             <div class="px-4 py-3 flex items-center gap-3">
-                {{-- Status indicator --}}
                 <span class="w-2 h-2 rounded-full bg-green-400 pulse-green flex-shrink-0"></span>
 
-                {{-- Call info --}}
                 <div class="flex-1 min-w-0">
                     <p class="text-xs font-semibold text-gray-900 truncate">
-                        {{ $call['src'] ?? $call['caller'] ?? 'Unknown' }}
+                        {{ $caller }}
                         <span class="text-gray-400 font-normal">→</span>
-                        {{ $call['dst'] ?? $call['extension'] ?? '—' }}
+                        {{ $exten }}
                     </p>
-                    <p class="text-xs text-gray-400">
-                        {{ $call['duration'] ?? '0:00' }} •
-                        {{ $call['state'] ?? $call['status'] ?? 'Active' }}
-                    </p>
+                    <p class="text-xs text-gray-400">{{ $dur }} • {{ $state }}</p>
                 </div>
 
-                {{-- Actions --}}
                 <div class="flex items-center gap-1 flex-shrink-0">
-                    {{-- Transfer --}}
-                    <button wire:click="openTransfer('{{ $call['channel'] ?? '' }}')"
+                    {{-- Transfer button --}}
+                    <button wire:click="openTransfer('{{ addslashes($channel) }}')"
                             class="p-1.5 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
                             title="Transfer">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
                         </svg>
                     </button>
-                    {{-- Hangup --}}
-                    <button wire:click="hangup('{{ $call['channel'] ?? '' }}')"
+                    {{-- Hangup button --}}
+                    <button wire:click="hangup('{{ addslashes($channel) }}')"
+                            wire:confirm="Hangup this call?"
                             class="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
                             title="Hangup">
                         <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
@@ -53,15 +59,23 @@
         </div>
     @endif
 
-    {{-- Transfer Modal --}}
+    {{-- Transfer modal --}}
     @if($showTransfer)
     <div class="px-4 py-3 border-t border-gray-100 bg-blue-50">
         <p class="text-xs font-medium text-blue-800 mb-2">Transfer to extension:</p>
         <div class="flex gap-2">
-            <input wire:model="transferTo" placeholder="e.g. 102"
-                   class="flex-1 text-xs border border-blue-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
-            <button wire:click="doTransfer" class="btn-primary text-xs px-3 py-1.5">Transfer</button>
-            <button wire:click="$set('showTransfer', false)" class="btn-secondary text-xs px-3 py-1.5">✕</button>
+            <input wire:model="transferTo"
+                   placeholder="e.g. 102"
+                   class="flex-1 text-xs border border-blue-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                   @keydown.enter="$wire.doTransfer()">
+            <button wire:click="doTransfer"
+                    class="btn-primary text-xs px-3 py-1.5">
+                Transfer
+            </button>
+            <button wire:click="$set('showTransfer', false)"
+                    class="btn-secondary text-xs px-3 py-1.5">
+                ✕
+            </button>
         </div>
     </div>
     @endif

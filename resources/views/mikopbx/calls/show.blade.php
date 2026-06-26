@@ -5,8 +5,8 @@
 @section('content')
 <div class="max-w-3xl space-y-6">
 
-    {{-- Back --}}
-    <a href="{{ route('mikopbx.calls.index') }}" class="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+    <a href="{{ route('mikopbx.calls.index') }}"
+       class="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
         ← Back to Calls
     </a>
 
@@ -20,13 +20,17 @@
                     {{ $call->started_at?->format('d M Y, H:i:s') }}
                 </p>
             </div>
-            <span class="badge text-sm px-3 py-1
-                @match($call->status)
-                    @case('answered') bg-green-100 text-green-800 @break
-                    @case('missed')   bg-red-100 text-red-800 @break
-                    @case('busy')     bg-orange-100 text-orange-800 @break
-                    @default          bg-gray-100 text-gray-700
-                @endmatch">
+            {{-- FIX: @match cannot be inline inside class="". Use @php variable. --}}
+            @php
+                $statusBadge = match($call->status) {
+                    'answered' => 'bg-green-100 text-green-800',
+                    'missed'   => 'bg-red-100 text-red-800',
+                    'busy'     => 'bg-orange-100 text-orange-800',
+                    'failed'   => 'bg-red-200 text-red-900',
+                    default    => 'bg-gray-100 text-gray-700',
+                };
+            @endphp
+            <span class="badge text-sm px-3 py-1 {{ $statusBadge }}">
                 {{ ucfirst($call->status) }}
             </span>
         </div>
@@ -68,20 +72,20 @@
     </div>
 
     {{-- Recording --}}
-    @if($call->recording_file)
+    @if($call->recording_file || $call->recording_url)
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <h3 class="font-semibold text-gray-900 mb-4">Call Recording</h3>
         <audio controls class="w-full"
                src="{{ route('mikopbx.recordings.play', ['filename' => $call->recording_file]) }}">
-            Your browser does not support the audio element.
+            Your browser does not support audio playback.
         </audio>
         <p class="text-xs text-gray-400 mt-2">{{ $call->recording_file }}</p>
     </div>
     @endif
 
     {{-- Actions --}}
-    <div class="flex items-center gap-3">
-        <button onclick="window.dispatchEvent(new CustomEvent('mikopbx:dial', {detail:'{{ $call->caller }}'}))"
+    <div class="flex items-center gap-3 flex-wrap">
+        <button onclick="window.mikopbxDial && window.mikopbxDial('{{ $call->caller }}')"
                 class="btn-primary">
             📞 Call Back {{ $call->caller }}
         </button>
@@ -89,19 +93,17 @@
         <form method="POST" action="{{ route('mikopbx.callbacks.store') }}">
             @csrf
             <input type="hidden" name="number" value="{{ $call->caller }}">
-            <input type="hidden" name="note" value="Follow-up from call log #{{ $call->id }}">
+            <input type="hidden" name="note" value="Follow-up from call #{{ $call->id }}">
             <input type="hidden" name="call_log_id" value="{{ $call->id }}">
             <button type="submit" class="btn-secondary">+ Schedule Callback</button>
         </form>
 
-        <form method="POST" action="{{ route('mikopbx.blacklist.store') }}">
+        <form method="POST" action="{{ route('mikopbx.blacklist.store') }}"
+              onsubmit="return confirm('Block {{ $call->caller }}?')">
             @csrf
             <input type="hidden" name="number" value="{{ $call->caller }}">
             <input type="hidden" name="reason" value="Blocked from call log">
-            <button type="submit" class="btn-danger"
-                    onclick="return confirm('Block {{ $call->caller }}?')">
-                🚫 Blacklist
-            </button>
+            <button type="submit" class="btn-danger">🚫 Blacklist</button>
         </form>
     </div>
 </div>

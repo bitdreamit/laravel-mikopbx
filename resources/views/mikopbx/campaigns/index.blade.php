@@ -20,14 +20,33 @@
     @else
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         @foreach($campaigns as $campaign)
+        @php
+            $statusBadge = match($campaign->status) {
+                'running'   => 'bg-green-100 text-green-800',
+                'paused'    => 'bg-yellow-100 text-yellow-800',
+                'completed' => 'bg-blue-100 text-blue-800',
+                'failed'    => 'bg-red-100 text-red-800',
+                default     => 'bg-gray-100 text-gray-700',
+            };
+            $barColor = match($campaign->status) {
+                'running'   => 'bg-green-500',
+                'completed' => 'bg-blue-500',
+                default     => 'bg-gray-300',
+            };
+        @endphp
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
             <div class="p-5">
                 <div class="flex items-start justify-between mb-3">
                     <div class="min-w-0 flex-1">
                         <h3 class="font-semibold text-gray-900 truncate">{{ $campaign->name }}</h3>
-                        <p class="text-xs text-gray-400 mt-0.5">{{ ucfirst($campaign->type) }} • Created {{ $campaign->created_at->diffForHumans() }}</p>
+                        <p class="text-xs text-gray-400 mt-0.5">
+                            {{ ucfirst($campaign->type) }} •
+                            Created {{ $campaign->created_at->diffForHumans() }}
+                        </p>
                     </div>
-                    <span class="badge ml-2 flex-shrink-0 {{ $campaign->status_badge }}">{{ ucfirst($campaign->status) }}</span>
+                    <span class="badge ml-2 flex-shrink-0 {{ $statusBadge }}">
+                        {{ ucfirst($campaign->status) }}
+                    </span>
                 </div>
 
                 {{-- Progress bar --}}
@@ -37,8 +56,7 @@
                         <span>{{ $campaign->progress }}%</span>
                     </div>
                     <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                        <div class="h-full rounded-full transition-all duration-700
-                            {{ $campaign->status === 'completed' ? 'bg-blue-500' : ($campaign->status === 'running' ? 'bg-green-500' : 'bg-gray-300') }}"
+                        <div class="h-full rounded-full transition-all duration-700 {{ $barColor }}"
                              style="width:{{ $campaign->progress }}%"></div>
                     </div>
                 </div>
@@ -61,7 +79,8 @@
 
                 {{-- Actions --}}
                 <div class="flex items-center gap-2">
-                    <a href="{{ route('mikopbx.campaigns.show', $campaign) }}" class="btn-secondary text-xs flex-1 justify-center">Detail</a>
+                    <a href="{{ route('mikopbx.campaigns.show', $campaign) }}"
+                       class="btn-secondary text-xs flex-1 justify-center">Detail</a>
 
                     @if(in_array($campaign->status, ['draft','paused']))
                         <form method="POST" action="{{ route('mikopbx.campaigns.start', $campaign) }}" class="flex-1">
@@ -71,12 +90,18 @@
                     @elseif($campaign->status === 'running')
                         <form method="POST" action="{{ route('mikopbx.campaigns.pause', $campaign) }}">
                             @csrf
-                            <button type="submit" class="inline-flex items-center px-3 py-1.5 bg-yellow-100 text-yellow-800 text-xs font-medium rounded-lg hover:bg-yellow-200">⏸</button>
+                            <button type="submit"
+                                    class="inline-flex items-center px-3 py-1.5 bg-yellow-100 text-yellow-800 text-xs font-medium rounded-lg hover:bg-yellow-200">
+                                ⏸
+                            </button>
                         </form>
                         <form method="POST" action="{{ route('mikopbx.campaigns.stop', $campaign) }}"
                               onsubmit="return confirm('Stop campaign?')">
                             @csrf
-                            <button type="submit" class="inline-flex items-center px-3 py-1.5 bg-red-100 text-red-700 text-xs font-medium rounded-lg hover:bg-red-200">■</button>
+                            <button type="submit"
+                                    class="inline-flex items-center px-3 py-1.5 bg-red-100 text-red-700 text-xs font-medium rounded-lg hover:bg-red-200">
+                                ■
+                            </button>
                         </form>
                     @endif
                 </div>
@@ -85,7 +110,9 @@
             @if($campaign->started_at)
             <div class="px-5 py-2 bg-gray-50 border-t border-gray-100 text-xs text-gray-400">
                 Started {{ $campaign->started_at->diffForHumans() }}
-                @if($campaign->completed_at) • Completed {{ $campaign->completed_at->diffForHumans() }} @endif
+                @if($campaign->completed_at)
+                    • Completed {{ $campaign->completed_at->diffForHumans() }}
+                @endif
             </div>
             @endif
         </div>

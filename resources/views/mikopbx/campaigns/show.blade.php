@@ -3,11 +3,23 @@
 @section('heading', $campaign->name)
 
 @section('content')
-<div class="space-y-6" x-data="campaignDetail({{ $campaign->id }}, '{{ $campaign->status }}')">
+{{-- campaignDetail() is defined in layouts/app.blade.php head --}}
+<div class="space-y-6" x-data="{ progress: {{ $stats['progress'] }}, status: '{{ $campaign->status }}' }">
 
     <div class="flex items-center gap-3">
-        <a href="{{ route('mikopbx.campaigns.index') }}" class="text-sm text-gray-500 hover:text-gray-700">← Campaigns</a>
-        <span class="badge {{ $campaign->status_badge }}">{{ ucfirst($campaign->status) }}</span>
+        <a href="{{ route('mikopbx.campaigns.index') }}" class="text-sm text-gray-500 hover:text-gray-700">
+            ← Campaigns
+        </a>
+        @php
+            $statusBadge = match($campaign->status) {
+                'running'   => 'bg-green-100 text-green-800',
+                'paused'    => 'bg-yellow-100 text-yellow-800',
+                'completed' => 'bg-blue-100 text-blue-800',
+                'failed'    => 'bg-red-100 text-red-800',
+                default     => 'bg-gray-100 text-gray-700',
+            };
+        @endphp
+        <span class="badge {{ $statusBadge }}">{{ ucfirst($campaign->status) }}</span>
     </div>
 
     {{-- KPI cards --}}
@@ -27,21 +39,27 @@
         @endforeach
     </div>
 
-    {{-- Progress --}}
+    {{-- Progress bar --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
         <div class="flex justify-between text-sm mb-2">
             <span class="font-medium text-gray-700">Progress</span>
             <span class="text-gray-500" x-text="progress + '%'">{{ $stats['progress'] }}%</span>
         </div>
         <div class="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
-            <div class="h-full rounded-full transition-all duration-700
-                {{ $campaign->status === 'completed' ? 'bg-blue-500' : ($campaign->status === 'running' ? 'bg-green-500' : 'bg-indigo-400') }}"
+            @php
+                $barColor = match($campaign->status) {
+                    'completed' => 'bg-blue-500',
+                    'running'   => 'bg-green-500',
+                    default     => 'bg-indigo-400',
+                };
+            @endphp
+            <div class="h-full rounded-full transition-all duration-700 {{ $barColor }}"
                  :style="'width:' + progress + '%'"></div>
         </div>
     </div>
 
-    {{-- Campaign actions --}}
-    <div class="flex items-center gap-3">
+    {{-- Actions --}}
+    <div class="flex items-center gap-3 flex-wrap">
         @if(in_array($campaign->status, ['draft','paused']))
             <form method="POST" action="{{ route('mikopbx.campaigns.start', $campaign) }}">
                 @csrf
@@ -60,7 +78,7 @@
             </form>
         @endif
 
-        <div class="ml-auto flex items-center gap-2 text-xs text-gray-400">
+        <div class="ml-auto flex items-center gap-3 text-xs text-gray-400">
             <span>Max channels: {{ $campaign->max_channels }}</span>
             <span>•</span>
             <span>Retries: {{ $campaign->retry_attempts }}</span>
@@ -91,29 +109,35 @@
                 </thead>
                 <tbody class="divide-y divide-gray-50">
                     @forelse($numbers as $num)
+                    @php
+                        $numBadge = match($num->status) {
+                            'answered'  => 'bg-green-50 text-green-700',
+                            'no_answer' => 'bg-yellow-50 text-yellow-700',
+                            'busy'      => 'bg-orange-50 text-orange-700',
+                            'failed'    => 'bg-red-50 text-red-700',
+                            'opted_out' => 'bg-gray-100 text-gray-600',
+                            'dialing'   => 'bg-blue-50 text-blue-700',
+                            default     => 'bg-gray-50 text-gray-500',
+                        };
+                    @endphp
                     <tr class="table-row">
                         <td class="px-4 py-2 font-mono text-xs font-medium">{{ $num->number }}</td>
                         <td class="px-4 py-2 text-xs text-gray-600">{{ $num->name ?? '—' }}</td>
                         <td class="px-4 py-2">
-                            <span class="badge text-xs
-                                @match($num->status)
-                                    @case('answered')  bg-green-50 text-green-700 @break
-                                    @case('no_answer') bg-yellow-50 text-yellow-700 @break
-                                    @case('busy')      bg-orange-50 text-orange-700 @break
-                                    @case('failed')    bg-red-50 text-red-700 @break
-                                    @case('opted_out') bg-gray-100 text-gray-600 @break
-                                    @case('dialing')   bg-blue-50 text-blue-700 @break
-                                    @default           bg-gray-50 text-gray-500
-                                @endmatch">
-                                {{ ucfirst(str_replace('_',' ',$num->status)) }}
+                            <span class="badge text-xs {{ $numBadge }}">
+                                {{ ucfirst(str_replace('_', ' ', $num->status)) }}
                             </span>
                         </td>
                         <td class="px-4 py-2 text-xs text-gray-600">{{ $num->attempt }}</td>
                         <td class="px-4 py-2 text-xs text-gray-600">{{ $num->dtmf_response ?? '—' }}</td>
-                        <td class="px-4 py-2 text-xs text-gray-400">{{ $num->last_attempted_at?->diffForHumans() ?? 'Not yet' }}</td>
+                        <td class="px-4 py-2 text-xs text-gray-400">
+                            {{ $num->last_attempted_at?->diffForHumans() ?? 'Not yet' }}
+                        </td>
                     </tr>
                     @empty
-                    <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400">No numbers yet</td></tr>
+                    <tr>
+                        <td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400">No numbers yet</td>
+                    </tr>
                     @endforelse
                 </tbody>
             </table>
@@ -122,24 +146,26 @@
     </div>
 </div>
 
+@push('scripts')
 <script>
-function campaignDetail(id, status) {
-    return {
-        progress: {{ $stats['progress'] }},
-        status: status,
-        init() {
-            if (this.status === 'running') {
-                setInterval(() => this.syncProgress(), 8000);
+// Live progress sync for running campaigns
+(function () {
+    const status = '{{ $campaign->status }}';
+    if (status !== 'running') return;
+
+    const el = document.querySelector('[x-data]');
+    if (!el) return;
+
+    setInterval(async () => {
+        try {
+            const r = await fetch('{{ route("mikopbx.campaigns.progress", $campaign) }}');
+            const d = await r.json();
+            if (d.progress !== undefined && el._x_dataStack) {
+                el._x_dataStack[0].progress = d.progress;
             }
-        },
-        async syncProgress() {
-            try {
-                const r = await fetch(`{{ route('mikopbx.campaigns.progress', '') }}/${id}`);
-                const d = await r.json();
-                if (d.progress !== undefined) this.progress = d.progress;
-            } catch {}
-        }
-    };
-}
+        } catch {}
+    }, 8000);
+})();
 </script>
+@endpush
 @endsection

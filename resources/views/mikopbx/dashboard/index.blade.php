@@ -3,6 +3,10 @@
 @section('heading', 'Call Center Dashboard')
 
 @section('content')
+{{--
+    dashboard() and taskManager() are defined in layouts/app.blade.php <head>
+    so Alpine can find them before it boots. Do NOT redefine them here.
+--}}
 <div class="space-y-6" x-data="dashboard()">
 
     {{-- KPI Row --}}
@@ -28,7 +32,9 @@
         </div>
         <div class="stat-card">
             <p class="text-xs text-gray-500 font-medium">Agents Online</p>
-            <p class="text-2xl font-bold text-gray-900 mt-1">{{ $stats['agents_online'] }}<span class="text-sm text-gray-400">/{{ $stats['agents_total'] }}</span></p>
+            <p class="text-2xl font-bold text-gray-900 mt-1">
+                {{ $stats['agents_online'] }}<span class="text-sm text-gray-400">/{{ $stats['agents_total'] }}</span>
+            </p>
         </div>
         <div class="stat-card">
             <p class="text-xs text-gray-500 font-medium">Callbacks</p>
@@ -45,32 +51,35 @@
 
         {{-- LEFT: Live Call Board + Agent Grid --}}
         <div class="col-span-12 lg:col-span-5 space-y-4">
-
-            {{-- Live Call Board --}}
             @livewire('mikopbx-live-call-board')
-
-            {{-- Agent Grid --}}
             @livewire('mikopbx-agent-status-grid')
         </div>
 
-        {{-- MIDDLE: Task Manager (htncr.org style) --}}
+        {{-- MIDDLE: Task Manager --}}
         <div class="col-span-12 lg:col-span-4" x-data="taskManager()">
             <div class="bg-white rounded-xl shadow-sm border border-gray-100">
                 <div class="border-b border-gray-100 px-4 py-3 flex items-center justify-between">
                     <h3 class="font-semibold text-gray-900 text-sm">Task Manager</h3>
                     <div class="flex gap-1">
-                        <button @click="tab='pending'"
-                                :class="tab==='pending' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:text-gray-700'"
+                        <button @click="tab = 'pending'"
+                                :class="tab === 'pending'
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'text-gray-500 hover:text-gray-700'"
                                 class="px-2.5 py-1 text-xs font-medium rounded-md transition-colors">
-                            Pending <span class="ml-1 opacity-75" x-text="tasks.pending.length"></span>
+                            Pending
+                            <span class="ml-1 opacity-75" x-text="tasks.pending.length"></span>
                         </button>
-                        <button @click="tab='done'"
-                                :class="tab==='done' ? 'bg-green-600 text-white' : 'text-gray-500 hover:text-gray-700'"
+                        <button @click="tab = 'done'"
+                                :class="tab === 'done'
+                                    ? 'bg-green-600 text-white'
+                                    : 'text-gray-500 hover:text-gray-700'"
                                 class="px-2.5 py-1 text-xs font-medium rounded-md transition-colors">
                             Done
                         </button>
-                        <button @click="tab='transferred'"
-                                :class="tab==='transferred' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-700'"
+                        <button @click="tab = 'transferred'"
+                                :class="tab === 'transferred'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'text-gray-500 hover:text-gray-700'"
                                 class="px-2.5 py-1 text-xs font-medium rounded-md transition-colors">
                             Transferred
                         </button>
@@ -80,11 +89,14 @@
                 {{-- Add Task --}}
                 <div class="px-4 py-3 border-b border-gray-50">
                     <div class="flex gap-2">
-                        <input x-model="newTask" @keydown.enter="addTask()"
+                        <input x-model="newTask"
+                               @keydown.enter="addTask()"
                                placeholder="Add task or note…"
                                class="flex-1 text-xs border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                         <button @click="addTask()"
-                                class="px-3 py-2 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700">+</button>
+                                class="px-3 py-2 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700">
+                            +
+                        </button>
                     </div>
                 </div>
 
@@ -92,21 +104,28 @@
                 <div class="divide-y divide-gray-50 max-h-72 overflow-y-auto">
                     <template x-for="(task, i) in tasks[tab]" :key="task.id">
                         <div class="flex items-start gap-3 px-4 py-3 hover:bg-gray-50 group">
-                            <input type="checkbox" @change="completeTask(tab, i)"
-                                   :checked="tab==='done'"
+                            <input type="checkbox"
+                                   @change="completeTask(tab, i)"
+                                   :checked="tab === 'done'"
                                    class="mt-0.5 rounded border-gray-300 text-indigo-600 flex-shrink-0">
                             <div class="flex-1 min-w-0">
-                                <p class="text-xs text-gray-800 leading-snug" x-text="task.text"
-                                   :class="tab==='done' ? 'line-through text-gray-400' : ''"></p>
+                                <p class="text-xs text-gray-800 leading-snug"
+                                   x-text="task.text"
+                                   :class="tab === 'done' ? 'line-through text-gray-400' : ''"></p>
                                 <p class="text-xs text-gray-400 mt-0.5" x-text="task.time"></p>
                             </div>
                             <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                                <button @click="transferTask(tab, i)" title="Transfer" class="text-xs text-blue-500 hover:text-blue-700">↗</button>
-                                <button @click="removeTask(tab, i)" class="text-xs text-red-400 hover:text-red-600">✕</button>
+                                <button @click="transferTask(tab, i)"
+                                        title="Transfer"
+                                        class="text-xs text-blue-500 hover:text-blue-700">↗</button>
+                                <button @click="removeTask(tab, i)"
+                                        class="text-xs text-red-400 hover:text-red-600">✕</button>
                             </div>
                         </div>
                     </template>
-                    <div x-show="tasks[tab].length===0" class="px-4 py-8 text-center text-xs text-gray-400">
+
+                    <div x-show="tasks[tab].length === 0"
+                         class="px-4 py-8 text-center text-xs text-gray-400">
                         No <span x-text="tab"></span> tasks
                     </div>
                 </div>
@@ -120,14 +139,16 @@
             <div class="bg-white rounded-xl shadow-sm border border-gray-100">
                 <div class="border-b border-gray-100 px-4 py-3 flex items-center justify-between">
                     <h3 class="font-semibold text-gray-900 text-sm">Follow-up List</h3>
-                    <a href="{{ route('mikopbx.callbacks.index') }}" class="text-xs text-indigo-600 hover:underline">All</a>
+                    <a href="{{ route('mikopbx.callbacks.index') }}"
+                       class="text-xs text-indigo-600 hover:underline">All</a>
                 </div>
                 <div class="divide-y divide-gray-50 max-h-56 overflow-y-auto">
                     @forelse($pendingCallbacks as $cb)
                         <div class="px-4 py-3 flex items-center gap-3 hover:bg-gray-50 group">
                             <div class="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
                                 <svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/>
                                 </svg>
                             </div>
                             <div class="flex-1 min-w-0">
@@ -148,22 +169,28 @@
             </div>
 
             {{-- Recent Calls --}}
+            {{--
+                FIX: @match cannot be used inline inside a class string.
+                Use a PHP variable or ternary instead.
+            --}}
             <div class="bg-white rounded-xl shadow-sm border border-gray-100">
                 <div class="border-b border-gray-100 px-4 py-3 flex items-center justify-between">
                     <h3 class="font-semibold text-gray-900 text-sm">Recent Calls</h3>
-                    <a href="{{ route('mikopbx.calls.index') }}" class="text-xs text-indigo-600 hover:underline">All</a>
+                    <a href="{{ route('mikopbx.calls.index') }}"
+                       class="text-xs text-indigo-600 hover:underline">All</a>
                 </div>
                 <div class="divide-y divide-gray-50 max-h-56 overflow-y-auto">
                     @forelse($recentCalls as $call)
+                        @php
+                            $dotColor = match($call->status) {
+                                'answered' => 'bg-green-400',
+                                'missed'   => 'bg-red-400',
+                                'busy'     => 'bg-orange-400',
+                                default    => 'bg-gray-300',
+                            };
+                        @endphp
                         <div class="px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50">
-                            <span class="w-1.5 h-1.5 rounded-full flex-shrink-0
-                                @match($call->status)
-                                    @case('answered') bg-green-400 @break
-                                    @case('missed')   bg-red-400 @break
-                                    @case('busy')     bg-orange-400 @break
-                                    @default          bg-gray-300
-                                @endmatch">
-                            </span>
+                            <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ $dotColor }}"></span>
                             <div class="flex-1 min-w-0">
                                 <p class="text-xs font-medium text-gray-900 truncate">{{ $call->caller }}</p>
                                 <p class="text-xs text-gray-400">{{ $call->started_at?->diffForHumans() }}</p>
@@ -178,13 +205,12 @@
         </div>
     </div>
 
-    {{-- Bottom Row: Campaign Manager + Log Call Modal trigger --}}
+    {{-- Bottom Row: Campaign Manager + Quick Actions --}}
     <div class="grid grid-cols-12 gap-6">
         <div class="col-span-12 lg:col-span-8">
             @livewire('mikopbx-campaign-manager')
         </div>
         <div class="col-span-12 lg:col-span-4">
-            {{-- Quick Actions Panel --}}
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 space-y-3">
                 <h3 class="font-semibold text-gray-900 text-sm">Quick Actions</h3>
 
@@ -206,15 +232,17 @@
                     </div>
                 </a>
 
-                <a href="{{ route('mikopbx.agents.sync') }}"
-                   onclick="event.preventDefault(); fetch(this.href, {method:'POST', headers:{'X-CSRF-TOKEN':'{{ csrf_token() }}'}}).then(()=>location.reload())"
-                   class="flex items-center gap-3 p-3 rounded-lg border border-dashed border-gray-200 hover:bg-gray-50 group transition-colors">
-                    <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center text-gray-600 group-hover:bg-gray-200 transition-colors">🔄</span>
-                    <div>
-                        <p class="text-xs font-medium text-gray-900">Sync Extensions</p>
-                        <p class="text-xs text-gray-400">Pull from MikoPBX</p>
-                    </div>
-                </a>
+                <form method="POST" action="{{ route('mikopbx.agents.sync') }}">
+                    @csrf
+                    <button type="submit"
+                            class="w-full flex items-center gap-3 p-3 rounded-lg border border-dashed border-gray-200 hover:bg-gray-50 group transition-colors text-left">
+                        <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center text-gray-600 group-hover:bg-gray-200 transition-colors">🔄</span>
+                        <div>
+                            <p class="text-xs font-medium text-gray-900">Sync Extensions</p>
+                            <p class="text-xs text-gray-400">Pull from MikoPBX</p>
+                        </div>
+                    </button>
+                </form>
 
                 <a href="{{ route('mikopbx.health.index') }}"
                    class="flex items-center gap-3 p-3 rounded-lg border border-dashed border-gray-200 hover:bg-gray-50 group transition-colors">
@@ -228,50 +256,4 @@
         </div>
     </div>
 </div>
-
-@push('scripts')
-<script>
-function dashboard() {
-    return {
-        activeCalls: {{ $stats['active_calls'] }},
-        init() {
-            setInterval(async () => {
-                try {
-                    const r = await fetch('{{ route("mikopbx.calls.active") }}');
-                    const d = await r.json();
-                    this.activeCalls = d.data?.length ?? 0;
-                } catch {}
-            }, 8000);
-        }
-    };
-}
-
-function taskManager() {
-    const stored = JSON.parse(localStorage.getItem('mikopbx_tasks') || '{"pending":[],"done":[],"transferred":[]}');
-    return {
-        tab: 'pending',
-        newTask: '',
-        tasks: stored,
-        save() { localStorage.setItem('mikopbx_tasks', JSON.stringify(this.tasks)); },
-        addTask() {
-            if (!this.newTask.trim()) return;
-            this.tasks.pending.unshift({ id: Date.now(), text: this.newTask.trim(), time: new Date().toLocaleTimeString() });
-            this.newTask = '';
-            this.save();
-        },
-        completeTask(tab, i) {
-            const t = this.tasks[tab].splice(i, 1)[0];
-            if (tab !== 'done') this.tasks.done.unshift({...t, time: new Date().toLocaleTimeString()});
-            this.save();
-        },
-        transferTask(tab, i) {
-            const t = this.tasks[tab].splice(i, 1)[0];
-            this.tasks.transferred.unshift({...t, time: new Date().toLocaleTimeString()});
-            this.save();
-        },
-        removeTask(tab, i) { this.tasks[tab].splice(i, 1); this.save(); }
-    };
-}
-</script>
-@endpush
 @endsection

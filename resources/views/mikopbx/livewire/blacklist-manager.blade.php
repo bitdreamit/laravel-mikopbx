@@ -4,25 +4,36 @@
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
         <h3 class="font-semibold text-gray-900 text-sm mb-4">Block a Number</h3>
         <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <input wire:model="number" placeholder="Number e.g. 01711000000"
-                   class="input md:col-span-1">
-            <input wire:model="reason" placeholder="Reason (optional)"
+            <input wire:model="number"
+                   placeholder="Number e.g. 01711000000"
+                   class="input">
+            <input wire:model="reason"
+                   placeholder="Reason (optional)"
                    class="input">
             <select wire:model="direction" class="input">
                 <option value="both">Both (block all)</option>
                 <option value="inbound">Inbound only</option>
                 <option value="outbound">Outbound only</option>
             </select>
-            <button wire:click="add" class="btn-danger justify-center">🚫 Add to Blacklist</button>
+            <button wire:click="add"
+                    wire:loading.attr="disabled"
+                    class="btn-danger justify-center">
+                <span wire:loading.remove>🚫 Block Number</span>
+                <span wire:loading>Adding…</span>
+            </button>
         </div>
-        @error('number')<p class="text-xs text-red-500 mt-2">{{ $message }}</p>@enderror
+        @error('number')
+            <p class="text-xs text-red-500 mt-2">{{ $message }}</p>
+        @enderror
     </div>
 
-    {{-- List --}}
+    {{-- Search + list --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div class="border-b border-gray-100 px-4 py-3 flex items-center justify-between">
             <h3 class="font-semibold text-gray-900 text-sm">Blocked Numbers</h3>
-            <input wire:model.live="search" placeholder="Search…" class="input text-xs w-48">
+            <input wire:model.live="search"
+                   placeholder="Search…"
+                   class="input text-xs w-48">
         </div>
 
         <table class="w-full text-sm">
@@ -38,14 +49,27 @@
             </thead>
             <tbody class="divide-y divide-gray-50">
                 @forelse($list as $item)
+                @php
+                    $dirBadge = match($item->direction) {
+                        'inbound'  => 'bg-blue-50 text-blue-700',
+                        'outbound' => 'bg-purple-50 text-purple-700',
+                        default    => 'bg-red-50 text-red-700',
+                    };
+                @endphp
                 <tr class="table-row">
-                    <td class="px-4 py-2 font-mono font-medium text-gray-900 text-sm">{{ $item->number }}</td>
+                    <td class="px-4 py-2 font-mono font-medium text-gray-900 text-sm">
+                        {{ $item->number }}
+                    </td>
                     <td class="px-4 py-2">
-                        <span class="badge bg-red-50 text-red-700">{{ ucfirst($item->direction) }}</span>
+                        <span class="badge {{ $dirBadge }}">{{ ucfirst($item->direction) }}</span>
                     </td>
                     <td class="px-4 py-2 text-xs text-gray-600">{{ $item->reason ?? '—' }}</td>
-                    <td class="px-4 py-2 text-xs text-gray-500">{{ $item->expires_at?->format('d M Y') ?? 'Never' }}</td>
-                    <td class="px-4 py-2 text-xs text-gray-400">{{ $item->created_at->diffForHumans() }}</td>
+                    <td class="px-4 py-2 text-xs text-gray-500">
+                        {{ $item->expires_at?->format('d M Y') ?? 'Never' }}
+                    </td>
+                    <td class="px-4 py-2 text-xs text-gray-400">
+                        {{ $item->created_at->diffForHumans() }}
+                    </td>
                     <td class="px-4 py-2">
                         <button wire:click="remove('{{ $item->number }}')"
                                 wire:confirm="Remove {{ $item->number }} from blacklist?"
@@ -55,10 +79,19 @@
                     </td>
                 </tr>
                 @empty
-                <tr><td colspan="6" class="px-4 py-10 text-center text-sm text-gray-400">No blocked numbers</td></tr>
+                <tr>
+                    <td colspan="6" class="px-4 py-10 text-center text-sm text-gray-400">
+                        No blocked numbers
+                    </td>
+                </tr>
                 @endforelse
             </tbody>
         </table>
-        <div class="px-4 py-3 border-t border-gray-100">{{ $list->links() }}</div>
+
+        @if($list->hasPages())
+        <div class="px-4 py-3 border-t border-gray-100">
+            {{ $list->links() }}
+        </div>
+        @endif
     </div>
 </div>

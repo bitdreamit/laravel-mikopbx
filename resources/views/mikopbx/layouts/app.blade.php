@@ -6,17 +6,18 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'Call Center') — MikoPBX</title>
 
+    {{--
+        ⚠️  DO NOT load Alpine.js from CDN here.
+        Livewire v3 bundles its own Alpine internally via @livewireScripts.
+        Loading a second Alpine causes "multiple instances" error and breaks
+        all x-data components (tab, tasks, dashboard etc. become undefined).
+    --}}
+
     {{-- Tailwind CDN (replace with Vite build in production) --}}
     <script src="https://cdn.tailwindcss.com"></script>
 
-    {{-- Alpine.js --}}
-    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-
-    {{-- Chart.js --}}
+    {{-- Chart.js (safe — not Alpine) --}}
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-
-    {{-- SIP.js for web dialer --}}
-    <script src="https://unpkg.com/sip.js@0.21.2/lib/browser/index.js"></script>
 
     @livewireStyles
 
@@ -35,6 +36,269 @@
         .pulse-green { animation: pulseGreen 2s infinite; }
         @keyframes pulseGreen { 0%,100%{opacity:1;} 50%{opacity:.4;} }
     </style>
+
+    {{--
+        Register Alpine component functions BEFORE @livewireScripts boots Alpine.
+        All functions placed here in a plain <script> (no defer/module) are
+        available synchronously when Alpine initialises.
+    --}}
+    <script>
+        // ── Global Alpine component functions ────────────────────────────────
+        // These must live in a plain non-deferred <script> in <head> so
+        // Livewire's bundled Alpine can discover them at boot time.
+
+        function mikopbxApp() {
+            return {
+                sysOnline:     true,
+                activeCalls:   0,
+                agentsOnline:  0,
+                dialerOpen:    false,
+                dialString:    '',
+                inCall:        false,
+                callStatus:    '',
+                callTimer:     '00:00',
+                sipRegistered: false,
+                quickDial:     '',
+                _callSec:      0,
+                _timerRef:     null,
+
+                init() {
+                    this.pollStats();
+                    setInterval(() => this.pollStats(), 10000);
+
+                    document.addEventListener('livewire:initialized', () => {
+                        Livewire.on('play-ringtone',  () => {
+                            const a = document.getElementById('mikopbx-ringtone');
+                            if (a) a.play().catch(() => {});
+                        });
+                        Livewire.on('stop-ringtone',  () => {
+                            const a = document.getElementById('mikopbx-ringtone');
+                            if (a) { a.pause(); a.currentTime = 0; }
+                        });
+                        Livewire.on('click-to-call',  (e) => {
+                            const num = Array.isArray(e) ? e[0]?.to : e?.to;
+                            if (num) this.dial(num);
+                        });
+                        Livewire.on('toast', (e) => {
+                            const data = Array.isArray(e) ? e[0] : e;
+                            document.dispatchEvent(new CustomEvent('mikopbx:add-toast', { detail: data }));
+                        });
+                    });
+
+                    // Allow plain JS to dial: window.mikopbxDial('01711...')
+                    window.mikopbxDial = (num) => this.dial(num);
+                },
+
+                async pollStats() {
+                    try {
+                        const r = await fetch('{{ route("mikopbx.calls.active") }}', {
+                            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                        });
+                        if (r.ok) {
+                            const d = await r.json();
+                            this.activeCalls = Array.isArray(d) ? d.length : (d.data?.length ?? 0);
+                            this.sysOnline   = true;
+                        }
+                    } catch { this.sysOnline = false; }
+
+                    try {
+                        const r = await fetch('{{ route("mikopbx.agents.statuses") }}');
+                        if (r.ok) {
+                            const d  = await r.json();
+                            const ag = d.data ?? d;
+                            this.agentsOnline = Array.isArray(ag)
+                                ? ag.filter(a => ['online','busy'].includes(a.status)).length : 0;
+                        }
+                    } catch {}
+                },
+
+                pressKey(k)  { this.dialString += k; },
+                clearDial()  { this.dialString = this.dialString.slice(0, -1); },
+                dial(num)    {
+                    if (!num) return;
+                    this.dialString  = String(num);
+                    this.dialerOpen  = true;
+                    this.makeCall();
+                },
+
+                makeCall() {
+                    if (!this.dialString) return;
+                    this.callStatus = 'ringing';
+                    this.inCall     = true;
+                    this._callSec   = 0;
+                    clearInterval(this._timerRef);
+                    this._timerRef  = setInterval(() => {
+                        this._callSec++;
+                        const m = String(Math.floor(this._callSec / 60)).padStart(2, '0');
+                        const s = String(this._callSec % 60).padStart(2, '0');
+                        this.callTimer = `${m}:${s}`;
+                    }, 1000);
+
+                    fetch('{{ route("mikopbx.calls.originate") }}', {
+                        method:  'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                        },
+                        body: JSON.stringify({ from: '{{ auth()->user()?->email ?? "101" }}', to: this.dialString })
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                        this.callStatus = d.success ? 'active' : 'failed';
+                        if (!d.success) this.endCall();
+                    })
+                    .catch(() => { this.callStatus = 'failed'; this.endCall(); });
+                },
+
+                endCall() {
+                    clearInterval(this._timerRef);
+                    this.inCall     = false;
+                    this.callStatus = '';
+                    this.callTimer  = '00:00';
+                    this._callSec   = 0;
+                },
+            };
+        }
+
+        function toastManager() {
+            return {
+                toasts: [],
+                init() {
+                    document.addEventListener('mikopbx:add-toast', e => this.add(e.detail));
+                },
+                add({ type = 'info', msg = '' }) {
+                    const id = Date.now();
+                    this.toasts.push({ id, type, msg, visible: true });
+                    setTimeout(() => {
+                        const t = this.toasts.find(x => x.id === id);
+                        if (t) t.visible = false;
+                    }, 4000);
+                    setTimeout(() => {
+                        this.toasts = this.toasts.filter(x => x.id !== id);
+                    }, 4500);
+                }
+            };
+        }
+
+        function dashboard() {
+            return {
+                activeCalls: 0,
+                init() {
+                    setInterval(async () => {
+                        try {
+                            const r = await fetch('{{ route("mikopbx.calls.active") }}');
+                            const d = await r.json();
+                            this.activeCalls = Array.isArray(d) ? d.length : (d.data?.length ?? 0);
+                        } catch {}
+                    }, 8000);
+                }
+            };
+        }
+
+        function taskManager() {
+            const _def = { pending: [], done: [], transferred: [] };
+            let stored = _def;
+            try {
+                stored = JSON.parse(localStorage.getItem('mikopbx_tasks') || 'null') || _def;
+            } catch {}
+            return {
+                tab:     'pending',
+                newTask: '',
+                tasks:   stored,
+                save()   { try { localStorage.setItem('mikopbx_tasks', JSON.stringify(this.tasks)); } catch {} },
+                addTask() {
+                    if (!this.newTask.trim()) return;
+                    this.tasks.pending.unshift({
+                        id:   Date.now(),
+                        text: this.newTask.trim(),
+                        time: new Date().toLocaleTimeString()
+                    });
+                    this.newTask = '';
+                    this.save();
+                },
+                completeTask(tab, i) {
+                    const t = this.tasks[tab].splice(i, 1)[0];
+                    if (tab !== 'done') this.tasks.done.unshift({ ...t, time: new Date().toLocaleTimeString() });
+                    this.save();
+                },
+                transferTask(tab, i) {
+                    const t = this.tasks[tab].splice(i, 1)[0];
+                    this.tasks.transferred.unshift({ ...t, time: new Date().toLocaleTimeString() });
+                    this.save();
+                },
+                removeTask(tab, i) { this.tasks[tab].splice(i, 1); this.save(); }
+            };
+        }
+
+        function campaignCreate() {
+            return {
+                type:       'agent_connect',
+                inputMode:  'file',
+                numbersText:'',
+                fileCount:  0,
+                countFile(e) {
+                    const f = e.target.files[0];
+                    if (!f) return;
+                    const r = new FileReader();
+                    r.onload = ev => {
+                        this.fileCount = ev.target.result.split('\n').filter(l => l.trim()).length;
+                    };
+                    r.readAsText(f);
+                }
+            };
+        }
+
+        function recordingPlayer() {
+            return {
+                currentFile:  '',
+                currentLabel: '',
+                playing:      false,
+                play(filename, label) {
+                    if (this.currentFile === filename) {
+                        const p = document.getElementById('recording-player');
+                        this.playing ? p.pause() : p.play();
+                        return;
+                    }
+                    this.currentFile  = filename;
+                    this.currentLabel = label;
+                    this.$nextTick(() => {
+                        const p = document.getElementById('recording-player');
+                        p.src = `/{{ config('mikopbx.route_prefix','pbx') }}/recordings/play?filename=${encodeURIComponent(filename)}`;
+                        p.play();
+                        this.playing = true;
+                    });
+                }
+            };
+        }
+
+        function conferenceRoom(roomId) {
+            return {
+                roomId,
+                participants: [],
+                dialIn:       '',
+                async kick(channel) {
+                    await fetch('{{ route("mikopbx.conference.kick") }}', {
+                        method:  'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+                        body:    JSON.stringify({ channel, room: this.roomId })
+                    });
+                    this.participants = this.participants.filter(p => p.channel !== channel);
+                },
+                async muteP(channel) {
+                    await fetch('{{ route("mikopbx.conference.mute") }}', {
+                        method:  'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+                        body:    JSON.stringify({ channel, room: this.roomId })
+                    });
+                },
+                addParticipant() {
+                    if (!this.dialIn) return;
+                    window.mikopbxDial && window.mikopbxDial(this.dialIn);
+                    this.dialIn = '';
+                }
+            };
+        }
+    </script>
 </head>
 <body class="h-full flex overflow-hidden" x-data="mikopbxApp()">
 
@@ -57,7 +321,7 @@
         </div>
     </div>
 
-    {{-- System status dot --}}
+    {{-- System status --}}
     <div class="px-4 py-2 border-b border-gray-100">
         <div class="flex items-center gap-2 text-xs text-gray-500">
             <span :class="sysOnline ? 'bg-green-400 pulse-green' : 'bg-red-400'"
@@ -111,9 +375,9 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
             </svg>
             Callbacks
-            @php $pending = \BitDreamIT\MikoPBX\Models\Callback::where('status','pending')->count() @endphp
-            @if($pending)
-                <span class="ml-auto badge bg-red-100 text-red-700">{{ $pending }}</span>
+            @php $pendingCbCount = \BitDreamIT\MikoPBX\Models\Callback::where('status','pending')->count() @endphp
+            @if($pendingCbCount)
+                <span class="ml-auto badge bg-red-100 text-red-700">{{ $pendingCbCount }}</span>
             @endif
         </a>
 
@@ -170,7 +434,7 @@
         </a>
     </nav>
 
-    {{-- User + Dialer toggle --}}
+    {{-- Dialer toggle + User --}}
     <div class="border-t border-gray-100 p-3 space-y-2">
         <button @click="dialerOpen = !dialerOpen"
                 class="w-full flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors">
@@ -199,7 +463,6 @@
     <header class="h-16 bg-white border-b border-gray-100 flex items-center px-6 gap-4 flex-shrink-0">
         <h1 class="text-lg font-semibold text-gray-900">@yield('heading', 'Dashboard')</h1>
         <div class="ml-auto flex items-center gap-3">
-            {{-- Live stats --}}
             <div class="flex items-center gap-4 text-sm text-gray-500">
                 <span class="flex items-center gap-1.5">
                     <span class="w-2 h-2 bg-green-400 rounded-full pulse-green"></span>
@@ -212,27 +475,24 @@
             </div>
             {{-- Quick dial --}}
             <div class="relative">
-                <input x-model="quickDial" @keydown.enter="dial(quickDial)"
+                <input x-model="quickDial"
+                       @keydown.enter="dial(quickDial); quickDial=''"
                        placeholder="Quick dial…"
                        class="w-36 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <button @click="dial(quickDial)" x-show="quickDial"
-                        class="absolute right-2 top-1/2 -translate-y-1/2 text-indigo-600 hover:text-indigo-800">
-                    ↵
-                </button>
             </div>
         </div>
     </header>
 
     {{-- Flash messages --}}
     @if(session('success'))
-        <div x-data="{show:true}" x-init="setTimeout(()=>show=false,4000)" x-show="show"
-             class="mx-6 mt-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm flex items-center gap-2">
+        <div x-data="{ show: true }" x-init="setTimeout(() => show = false, 4000)" x-show="show"
+             class="mx-6 mt-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm">
             ✅ {{ session('success') }}
         </div>
     @endif
     @if(session('error'))
-        <div x-data="{show:true}" x-init="setTimeout(()=>show=false,5000)" x-show="show"
-             class="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm flex items-center gap-2">
+        <div x-data="{ show: true }" x-init="setTimeout(() => show = false, 5000)" x-show="show"
+             class="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
             ❌ {{ session('error') }}
         </div>
     @endif
@@ -244,7 +504,7 @@
 </div>
 
 {{-- ── Web Dialer Panel ─────────────────────────────────────────────── --}}
-<div x-show="dialerOpen" x-cloak x-transition
+<div x-show="dialerOpen" x-cloak
      class="fixed bottom-0 right-0 w-72 bg-white border border-gray-200 shadow-2xl rounded-tl-2xl z-50">
     <div class="p-4 border-b border-gray-100 flex items-center justify-between">
         <div class="flex items-center gap-2">
@@ -252,22 +512,27 @@
                   :class="sipRegistered ? 'bg-green-400 pulse-green' : 'bg-gray-300'"></span>
             <span class="text-sm font-semibold text-gray-800">Web Dialer</span>
         </div>
-        <button @click="dialerOpen=false" class="text-gray-400 hover:text-gray-600">✕</button>
+        <button @click="dialerOpen = false" class="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
     </div>
 
-    {{-- Display --}}
     <div class="p-4">
-        <div class="bg-gray-900 text-white rounded-xl p-4 mb-4 min-h-16 flex items-end">
-            <span class="text-2xl font-mono tracking-wider" x-text="dialString || '—'"></span>
+        {{-- Display --}}
+        <div class="bg-gray-900 text-white rounded-xl p-4 mb-3 min-h-14 flex items-end">
+            <span class="text-2xl font-mono tracking-wider break-all" x-text="dialString || '—'"></span>
         </div>
 
-        {{-- Call status --}}
-        <div x-show="callStatus" class="text-center text-sm mb-3 font-medium"
-             :class="{'text-green-600': callStatus==='active','text-yellow-600': callStatus==='ringing','text-red-600': callStatus==='ended'}"
+        {{-- Status --}}
+        <div x-show="callStatus"
+             class="text-center text-sm mb-3 font-medium"
+             :class="{
+                 'text-green-600':  callStatus === 'active',
+                 'text-yellow-600': callStatus === 'ringing',
+                 'text-red-600':    callStatus === 'failed'
+             }"
              x-text="callStatus"></div>
 
         {{-- Keypad --}}
-        <div class="grid grid-cols-3 gap-2 mb-4">
+        <div class="grid grid-cols-3 gap-2 mb-3">
             @foreach(['1','2','3','4','5','6','7','8','9','*','0','#'] as $k)
                 <button @click="pressKey('{{ $k }}')"
                         class="h-11 bg-gray-100 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl text-base font-semibold text-gray-800 transition-colors active:scale-95">
@@ -279,188 +544,64 @@
         {{-- Actions --}}
         <div class="grid grid-cols-3 gap-2">
             <button @click="clearDial()"
-                    class="h-10 bg-gray-100 hover:bg-gray-200 rounded-xl text-sm text-gray-600 font-medium transition-colors">
+                    class="h-10 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-600 font-medium transition-colors">
                 ⌫
             </button>
-            <button @click="makeCall()" x-show="!inCall"
-                    class="h-10 bg-green-500 hover:bg-green-600 rounded-xl text-white font-bold transition-colors col-span-2 flex items-center justify-center gap-2">
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/>
-                </svg>
-                Call
-            </button>
-            <button @click="endCall()" x-show="inCall"
-                    class="h-10 bg-red-500 hover:bg-red-600 rounded-xl text-white font-bold transition-colors col-span-2 flex items-center justify-center gap-2">
-                End Call
-            </button>
+            <template x-if="!inCall">
+                <button @click="makeCall()"
+                        class="col-span-2 h-10 bg-green-500 hover:bg-green-600 rounded-xl text-white font-bold transition-colors">
+                    📞 Call
+                </button>
+            </template>
+            <template x-if="inCall">
+                <button @click="endCall()"
+                        class="col-span-2 h-10 bg-red-500 hover:bg-red-600 rounded-xl text-white font-bold transition-colors">
+                    End Call
+                </button>
+            </template>
         </div>
 
-        {{-- Call timer --}}
-        <div x-show="inCall" class="text-center mt-3 text-sm text-gray-500">
-            <span x-text="callTimer"></span>
-        </div>
+        {{-- Timer --}}
+        <div x-show="inCall" class="text-center mt-2 text-sm text-gray-500 font-mono" x-text="callTimer"></div>
     </div>
 </div>
 
-{{-- ── Incoming Call Popup ───────────────────────────────────────────── --}}
+{{-- ── Incoming Call Popup (Livewire) ──────────────────────────────── --}}
 @livewire('mikopbx-incoming-popup')
 
 {{-- ── Toast Notifications ──────────────────────────────────────────── --}}
-<div x-data="toastManager()" class="fixed top-4 right-4 z-50 space-y-2 w-80">
+<div x-data="toastManager()" class="fixed top-4 right-4 z-50 space-y-2 w-80 pointer-events-none">
     <template x-for="t in toasts" :key="t.id">
-        <div x-show="t.visible" x-transition
+        <div x-show="t.visible"
+             x-transition:enter="transition ease-out duration-300"
+             x-transition:enter-start="opacity-0 translate-x-8"
+             x-transition:enter-end="opacity-100 translate-x-0"
+             x-transition:leave="transition ease-in duration-200"
+             x-transition:leave-start="opacity-100"
+             x-transition:leave-end="opacity-0"
              :class="{
-                'bg-green-50 border-green-200 text-green-800': t.type==='success',
-                'bg-red-50 border-red-200 text-red-800': t.type==='error',
-                'bg-blue-50 border-blue-200 text-blue-800': t.type==='info',
-                'bg-yellow-50 border-yellow-200 text-yellow-800': t.type==='warning',
+                 'bg-green-50 border-green-200 text-green-800':  t.type === 'success',
+                 'bg-red-50   border-red-200   text-red-800':    t.type === 'error',
+                 'bg-blue-50  border-blue-200  text-blue-800':   t.type === 'info',
+                 'bg-yellow-50 border-yellow-200 text-yellow-800': t.type === 'warning',
              }"
-             class="flex items-start gap-3 p-3 border rounded-xl shadow-lg text-sm">
-            <span x-text="{'success':'✅','error':'❌','info':'ℹ️','warning':'⚠️'}[t.type]"></span>
+             class="flex items-start gap-3 p-3 border rounded-xl shadow-lg text-sm pointer-events-auto">
+            <span x-text="{ success:'✅', error:'❌', info:'ℹ️', warning:'⚠️' }[t.type]"></span>
             <span x-text="t.msg" class="flex-1"></span>
-            <button @click="t.visible=false" class="opacity-50 hover:opacity-100 ml-1">✕</button>
         </div>
     </template>
 </div>
 
-{{-- ── Audio for ringtone ───────────────────────────────────────────── --}}
-<audio id="ringtone" loop preload="none">
-    <source src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=" type="audio/wav">
-</audio>
+{{-- Ringtone audio element --}}
+<audio id="mikopbx-ringtone" loop preload="none" src="/vendor/mikopbx/ringtone.mp3"></audio>
 
+{{--
+    @livewireScripts must come LAST — it boots Livewire AND Alpine.
+    All Alpine component functions must already be defined before this runs.
+    That is why we put all function definitions in <head> above.
+--}}
 @livewireScripts
 
-<script>
-// Alpine global state
-function mikopbxApp() {
-    return {
-        sysOnline:     true,
-        activeCalls:   0,
-        agentsOnline:  0,
-        dialerOpen:    false,
-        dialString:    '',
-        inCall:        false,
-        callStatus:    '',
-        callTimer:     '00:00',
-        sipRegistered: false,
-        quickDial:     '',
-        _callSec:      0,
-        _timerRef:     null,
-        _ua:           null,
-        _session:      null,
-
-        init() {
-            this.pollStats();
-            setInterval(() => this.pollStats(), 10000);
-            this.initSIP();
-
-            // Listen for Livewire events
-            document.addEventListener('livewire:initialized', () => {
-                Livewire.on('play-ringtone',  () => document.getElementById('ringtone')?.play());
-                Livewire.on('stop-ringtone',  () => { let a = document.getElementById('ringtone'); a?.pause(); a && (a.currentTime=0); });
-                Livewire.on('click-to-call',  (e) => this.dial(e[0]?.to || e.to));
-                Livewire.on('toast',          (e) => this.toast(e[0] || e));
-            });
-        },
-
-        async pollStats() {
-            try {
-                const r = await fetch('{{ route("mikopbx.calls.active") }}', {headers:{'X-Requested-With':'XMLHttpRequest'}});
-                if (r.ok) {
-                    const data = await r.json();
-                    this.activeCalls  = Array.isArray(data) ? data.length : (data.data?.length ?? 0);
-                    this.sysOnline    = true;
-                }
-            } catch { this.sysOnline = false; }
-
-            try {
-                const r = await fetch('{{ route("mikopbx.agents.statuses") }}');
-                if (r.ok) {
-                    const data = await r.json();
-                    const agents = data.data ?? data;
-                    this.agentsOnline = Array.isArray(agents)
-                        ? agents.filter(a => ['online','busy'].includes(a.status)).length : 0;
-                }
-            } catch {}
-        },
-
-        pressKey(k) { this.dialString += k; },
-        clearDial()  { this.dialString = this.dialString.slice(0,-1); },
-        dial(num)    { if(num){ this.dialString = num; this.dialerOpen = true; this.makeCall(); } },
-
-        makeCall() {
-            if (!this.dialString) return;
-            if (this._session) {
-                this._session.bye();
-            }
-            this.callStatus = 'ringing';
-            this.inCall = true;
-            this._callSec = 0;
-            this._timerRef = setInterval(() => {
-                this._callSec++;
-                const m = String(Math.floor(this._callSec/60)).padStart(2,'0');
-                const s = String(this._callSec%60).padStart(2,'0');
-                this.callTimer = `${m}:${s}`;
-            }, 1000);
-
-            // Click-to-call via API (fallback when SIP.js not connected)
-            if (!this.sipRegistered) {
-                fetch('{{ route("mikopbx.calls.originate") }}', {
-                    method: 'POST',
-                    headers: {'Content-Type':'application/json','X-CSRF-TOKEN':'{{ csrf_token() }}'},
-                    body: JSON.stringify({from: '{{ auth()->user()?->email ?? "101" }}', to: this.dialString})
-                }).then(r=>r.json()).then(d => {
-                    this.callStatus = d.success ? 'active' : 'failed';
-                    if (!d.success) this.endCall();
-                });
-            }
-        },
-
-        endCall() {
-            this._session?.bye();
-            this._session = null;
-            clearInterval(this._timerRef);
-            this.inCall     = false;
-            this.callStatus = '';
-            this.callTimer  = '00:00';
-            this._callSec   = 0;
-        },
-
-        initSIP() {
-            // SIP.js initialization — runs if dialer is enabled & SIP server configured
-            fetch('{{ route("mikopbx.dialer.config") }}')
-                .then(r => r.json())
-                .then(cfg => {
-                    if (!cfg.enabled || !cfg.extension || typeof SIP === 'undefined') return;
-                    // Full SIP.js UA setup would go here with cfg.ws_url, cfg.extension, etc.
-                    // Omitted to keep size manageable — drop in your SIP.js UA setup
-                    this.sipRegistered = false;
-                }).catch(() => {});
-        },
-
-        toast(e) {
-            // Trigger toastManager
-            document.dispatchEvent(new CustomEvent('add-toast', {detail: e}));
-        }
-    };
-}
-
-function toastManager() {
-    return {
-        toasts: [],
-        init() {
-            document.addEventListener('add-toast', e => this.add(e.detail));
-            // Also catch Livewire dispatch
-            Livewire.on('toast', e => this.add(Array.isArray(e) ? e[0] : e));
-        },
-        add({type='info', msg=''}) {
-            const id = Date.now();
-            this.toasts.push({id, type, msg, visible: true});
-            setTimeout(() => { const t = this.toasts.find(x=>x.id===id); if(t) t.visible=false; }, 4000);
-            setTimeout(() => { this.toasts = this.toasts.filter(x=>x.id!==id); }, 4500);
-        }
-    };
-}
-</script>
+@stack('scripts')
 </body>
 </html>
