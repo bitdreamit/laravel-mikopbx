@@ -157,12 +157,12 @@
                     @forelse($recentCalls as $call)
                         <div class="px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50">
                             <span class="w-1.5 h-1.5 rounded-full flex-shrink-0
-                                @match($call->status)
+                                @switch($call->status)
                                     @case('answered') bg-green-400 @break
                                     @case('missed')   bg-red-400 @break
                                     @case('busy')     bg-orange-400 @break
                                     @default          bg-gray-300
-                                @endmatch">
+                                @endswitch">
                             </span>
                             <div class="flex-1 min-w-0">
                                 <p class="text-xs font-medium text-gray-900 truncate">{{ $call->caller }}</p>

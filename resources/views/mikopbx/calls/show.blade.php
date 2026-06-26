@@ -21,12 +21,12 @@
                 </p>
             </div>
             <span class="badge text-sm px-3 py-1
-                @match($call->status)
+                @switch($call->status)
                     @case('answered') bg-green-100 text-green-800 @break
                     @case('missed')   bg-red-100 text-red-800 @break
                     @case('busy')     bg-orange-100 text-orange-800 @break
                     @default          bg-gray-100 text-gray-700
-                @endmatch">
+                @endswitch">
                 {{ ucfirst($call->status) }}
             </span>
         </div>
