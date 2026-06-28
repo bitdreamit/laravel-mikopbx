@@ -6,36 +6,41 @@ use BitDreamIT\MikoPBX\Models\HealthLog;
 
 class HealthCheckService
 {
-	public function __construct(
-		private RestApiService $api,
-		private AMIService     $ami
-	) {}
+    public function __construct(
+        private RestApiService $api,
+        private AMIService     $ami
+    ) {}
 
-	public function check(): array
-	{
-		$amiOk         = false;
-		$ariOk         = false;
-		$sipOk         = false;
-		$calls         = 0;
-		$onlineCount   = 0;
-		$onlineNumbers = '';
+    /**
+     * Run a full health check against MikoPBX.
+     * Uses correct v3 endpoints for all checks.
+     */
+    public function check(): array
+    {
+        $amiOk  = false;
+        $ariOk  = false;
+        $sipOk  = false;
+        $calls  = 0;
+        $online = 0;
 
-		// 1. AMI check
-		try {
-			if ($this->ami->connect()) {
-				$amiOk = true;
-				$this->ami->disconnect();
-			}
-		} catch (\Throwable) {}
+        // 1. AMI check — TCP socket connection on port 5038
+        try {
+            if ($this->ami->connect()) {
+                $amiOk = true;
+                $this->ami->disconnect();
+            }
+        } catch (\Throwable) {}
 
-		// 2. REST API reachability
-		try {
-			$info  = $this->api->getSystemInfo();
-			$ariOk = ($info['result'] ?? false) === true;
-		} catch (\Throwable) {}
+        // 2. REST API / ARI reachability check
+        //    Use GET /pbxcore/api/v3/sysinfo:getInfo (correct v3 endpoint)
+        try {
+            $info  = $this->api->getSystemInfo();
+            // result: true means the API key is valid and MikoPBX is responding
+            $ariOk = ($info['result'] ?? false) === true;
+        } catch (\Throwable) {}
 
-		// 3. SIP trunk registration
-		try {
+        // 3. SIP trunk registration — GET /pbxcore/api/v3/sip-providers:getStatuses
+        try {
 			$trunk     = $this->api->getTrunkStatus();
 			$data      = $trunk['data'] ?? [];
 			$allTrunks = array_merge(
@@ -47,68 +52,50 @@ class HealthCheckService
 			);
 		} catch (\Throwable) {}
 
-		// 4. Active calls count
-		try {
-			$active = $this->api->getActiveCalls();
-			$data   = $active['data'] ?? [];
-			$calls  = is_array($data) ? count($data) : 0;
-		} catch (\Throwable) {}
+        // 4. Active calls count — GET /pbxcore/api/v3/pbx-status:getActiveCalls
+        try {
+            $active = $this->api->getActiveCalls();
+            $data   = $active['data'] ?? [];
+            $calls  = is_array($data) ? count($data) : 0;
+        } catch (\Throwable) {}
 
-		// 5. Online extensions from MikoPBX API
-		try {
-			$peers  = $this->api->getExtensionStatuses();
-			$online = collect($peers['data'] ?? [])
-				->filter(fn($e) =>
-					$e['state'] === 'OK' &&
-					!str_contains($e['id'], '-TLS') &&
-					!str_contains($e['id'], '-WS') &&
-					!str_starts_with($e['id'], 'SIP-TRUNK-')
-				)
-				->values();
+        // 5. Online agent count (from local DB — extensions table)
+        try {
+            $online = \BitDreamIT\MikoPBX\Models\Extension::whereIn('status', ['online', 'busy'])->count();
+        } catch (\Throwable) {}
 
-			$onlineCount   = $online->count();
-			$onlineNumbers = $online->pluck('id')->join(', ');
-		} catch (\Throwable) {}
+        $status = match(true) {
+            ! $amiOk && ! $ariOk => 'critical',
+            ! $sipOk             => 'degraded',
+            default              => 'healthy',
+        };
 
-		$status = match(true) {
-			!$amiOk && !$ariOk => 'critical',
-			!$sipOk            => 'degraded',
-			default            => 'healthy',
-		};
+        $result = compact('amiOk', 'ariOk', 'sipOk', 'calls', 'online', 'status');
 
-		$result = [
-			'amiOk'          => $amiOk,
-			'ariOk'          => $ariOk,
-			'sipOk'          => $sipOk,
-			'calls'          => $calls,
-			'online'         => $onlineCount,
-			'online_numbers' => $onlineNumbers,
-			'status'         => $status,
-		];
+        // Persist to DB
+        HealthLog::create([
+            'status'            => $status,
+            'ami_connected'     => $amiOk,
+            'ari_connected'     => $ariOk,
+            'sip_trunk_up'      => $sipOk,
+            'active_calls'      => $calls,
+            'extensions_online' => $online,
+            'details'           => $result,
+            'checked_at'        => now(),
+        ]);
 
-		HealthLog::create([
-			'status'            => $status,
-			'ami_connected'     => $amiOk,
-			'ari_connected'     => $ariOk,
-			'sip_trunk_up'      => $sipOk,
-			'active_calls'      => $calls,
-			'extensions_online' => $onlineCount,
-			'details'           => $result,
-			'checked_at'        => now(),
-		]);
+        return $result;
+    }
 
-		return $result;
-	}
+    public function latest(): ?HealthLog
+    {
+        return HealthLog::latest('checked_at')->first();
+    }
 
-	public function latest(): ?HealthLog
-	{
-		return HealthLog::latest('checked_at')->first();
-	}
-
-	public function history(int $hours = 24): \Illuminate\Database\Eloquent\Collection
-	{
-		return HealthLog::where('checked_at', '>=', now()->subHours($hours))
-			->orderBy('checked_at')
-			->get();
-	}
+    public function history(int $hours = 24): \Illuminate\Database\Eloquent\Collection
+    {
+        return HealthLog::where('checked_at', '>=', now()->subHours($hours))
+            ->orderBy('checked_at')
+            ->get();
+    }
 }

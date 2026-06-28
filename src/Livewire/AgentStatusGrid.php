@@ -4,12 +4,11 @@ namespace BitDreamIT\MikoPBX\Livewire;
 
 use Livewire\Component;
 use BitDreamIT\MikoPBX\Services\AgentService;
-use BitDreamIT\MikoPBX\Models\Extension;
 
 class AgentStatusGrid extends Component
 {
-    public array  $agents       = [];
-    public int    $pollInterval = 10;
+    public array $agents       = [];
+    public int   $pollInterval = 10;
 
     protected $listeners = [
         'echo:mikopbx.agents,status' => 'onAgentStatus',
@@ -22,7 +21,12 @@ class AgentStatusGrid extends Component
         $this->agents = app(AgentService::class)->all()
             ->map(fn($a) => [
                 'extension' => $a->extension,
-                'name'      => $a->name,
+                /*
+                 * MikoPBX API sometimes returns HTML markup in extension names
+                 * (Semantic UI icon tags like <i class="icon">).
+                 * strip_tags() removes them so we only display plain text.
+                 */
+                'name'      => strip_tags($a->name ?? $a->extension),
                 'status'    => $a->status,
                 'dot'       => $a->status_dot,
                 'email'     => $a->email,

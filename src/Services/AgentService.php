@@ -10,10 +10,9 @@ class AgentService
 
     /**
      * Get all agents from local DB, merged with live SIP status from MikoPBX.
-     * Uses GET /pbxcore/api/v3/sip:getPeersStatuses for live state.
      *
-     * SipPeerStatus fields from API: id, state, useragent, ipaddress, port
-     * state values: OK | UNREACHABLE | LAGGED | UNKNOWN | OFF | REGISTERED
+     * SIP state values from real API (sip:getPeersStatuses):
+     *   OK | REGISTERED | UNREACHABLE | LAGGED | UNKNOWN | OFF
      */
     public function all(): \Illuminate\Database\Eloquent\Collection
     {
@@ -22,7 +21,7 @@ class AgentService
         try {
             $response = $this->api->getExtensionStatuses();
             $statuses = collect($response['data'] ?? [])
-                ->keyBy('id');     // keyed by SIP peer ID (usually the extension number)
+                ->keyBy('id');
         } catch (\Throwable) {
             $statuses = collect();
         }
@@ -31,7 +30,6 @@ class AgentService
             $live = $statuses->get($agent->sip_peer ?? $agent->extension);
 
             if ($live) {
-                // Map MikoPBX v3 SIP state to our status values
                 $agent->status = match(strtoupper($live['state'] ?? '')) {
                     'OK', 'REGISTERED'  => $agent->status === 'busy' ? 'busy' : 'online',
                     'UNREACHABLE',
@@ -47,30 +45,36 @@ class AgentService
     }
 
     /**
-     * Sync extensions from MikoPBX into local database.
-     * Uses GET /pbxcore/api/v3/extensions:getForSelect
+     * Sync extensions from MikoPBX REST API v3 into local DB.
      *
-     * Response items: { value: "101", text: "101 John Smith" }
-     * Also syncs from GET /pbxcore/api/v3/extensions for full data.
+     * Real getForSelect response:
+     *   data: [{"value": "101", "text": "101 John Smith"}, ...]
+     *
+     * Note: MikoPBX sometimes includes Semantic UI HTML in the text field.
+     *   e.g. "text": "101 <i class=\"phone icon\"></i> John Smith"
+     *   We strip all HTML tags before storing.
      */
     public function sync(): int
     {
         $count = 0;
 
-        // Primary: use getForSelect for extension numbers
         try {
-            $selectItems = $this->api->getExtensions()['data'] ?? [];
+            $response = $this->api->getExtensions();
+            $items    = $response['data'] ?? [];
 
-            foreach ($selectItems as $item) {
-                // { value: "101", text: "101 John Smith" }
-                $extNum = $item['value'] ?? '';
-                $name   = $item['text']  ?? $extNum;
-
+            foreach ($items as $item) {
+                $extNum = trim($item['value'] ?? '');
                 if (empty($extNum)) continue;
 
-                // Strip extension number prefix from display name if present
-                // e.g. "101 John Smith" → "John Smith"
-                $name = preg_replace('/^\d+\s+/', '', $name) ?: $name;
+                // Strip any HTML tags MikoPBX may include in display names
+                $rawName = $item['text'] ?? $extNum;
+                $name    = strip_tags($rawName);
+
+                // Remove extension number prefix from display name
+                // "101 John Smith" → "John Smith"
+                // "101" → "101" (keep if no name follows)
+                $name = preg_replace('/^' . preg_quote($extNum, '/') . '\s+/', '', $name);
+                $name = trim($name) ?: $extNum;
 
                 Extension::updateOrCreate(
                     ['extension' => $extNum],
@@ -83,30 +87,9 @@ class AgentService
                 $count++;
             }
         } catch (\Throwable $e) {
-            // Fall through to try full list
-        }
-
-        // If no results, try full extension list
-        if ($count === 0) {
-            try {
-                $fullList = $this->api->getExtensionsList()['data'] ?? [];
-
-                foreach ($fullList as $ext) {
-                    $extNum = $ext['number'] ?? $ext['extension'] ?? $ext['id'] ?? '';
-                    if (empty($extNum)) continue;
-
-                    Extension::updateOrCreate(
-                        ['extension' => $extNum],
-                        [
-                            'name'   => $ext['name'] ?? $ext['username'] ?? $extNum,
-                            'email'  => $ext['email'] ?? null,
-                            'mobile' => $ext['mobile'] ?? null,
-                            'active' => true,
-                        ]
-                    );
-                    $count++;
-                }
-            } catch (\Throwable) {}
+            \Illuminate\Support\Facades\Log::error(
+                "MikoPBX: sync-extensions failed: " . $e->getMessage()
+            );
         }
 
         return $count;

@@ -110,14 +110,38 @@ class RestApiService
      * @param string $to          e.g. "2026-06-30 23:59:59"
      * @param array  $filters     Optional: src_num, dst_num, disposition, limit, offset
      */
+    /**
+     * Get CDR records from MikoPBX REST API v3.
+     *
+     * REAL response structure (confirmed from actual API):
+     *   data.records[]         — grouped call records (one per linkedid/call)
+     *   data.records[].records[] — individual channel legs inside each call
+     *   data.pagination.hasMore  — true if more pages exist
+     *   data.pagination.total    — total record count
+     *
+     * disposition values in real data: ANSWERED | NOANSWER | BUSY | FAILED
+     *
+     * @param string $from     e.g. "2026-06-20 00:00:00"
+     * @param string $to       e.g. "2026-06-27 23:59:59"
+     * @param array  $filters  Optional: limit, offset, src_num, dst_num, search
+     */
     public function getCDR(string $from, string $to, array $filters = []): array
     {
-        return $this->get('/pbxcore/api/v3/cdr', array_merge([
+        $params = [
             'dateFrom' => $from,
             'dateTo'   => $to,
-            'limit'    => $filters['limit']  ?? 100,
-            'offset'   => $filters['offset'] ?? 0,
-        ], array_diff_key($filters, ['limit' => 0, 'offset' => 0])));
+            'limit'    => (int) ($filters['limit']  ?? 100),
+            'offset'   => (int) ($filters['offset'] ?? 0),
+        ];
+
+        // Optional filters supported by the API
+        foreach (['src_num', 'dst_num', 'search', 'from_account'] as $key) {
+            if (! empty($filters[$key])) {
+                $params[$key] = $filters[$key];
+            }
+        }
+
+        return $this->get('/pbxcore/api/v3/cdr', $params);
     }
 
     /**
@@ -146,29 +170,47 @@ class RestApiService
      * @param string $to      Date to
      * @param string $number  Optional number filter (searches src_num or dst_num separately)
      */
+    /**
+     * Get CDR records that have recordings — flattened from nested structure.
+     *
+     * Real API returns: data.records[].records[] (nested by linkedid grouping).
+     * This method flattens and filters to only records with a playback_url.
+     *
+     * @param string $from    e.g. "2026-06-20 00:00:00"
+     * @param string $to      e.g. "2026-06-27 23:59:59"
+     * @param string $number  Optional: filter by caller number (src_num)
+     */
     public function getRecordings(string $from, string $to, string $number = ''): array
     {
-        $params = [
-            'dateFrom' => $from,
-            'dateTo'   => $to,
-            'limit'    => 200,
-        ];
-        if ($number) {
-            // API filters by src_num or dst_num; pass src_num — caller side
-            $params['src_num'] = $number;
-        }
+        $params = ['dateFrom' => $from, 'dateTo' => $to, 'limit' => 200, 'offset' => 0];
+        if ($number) { $params['src_num'] = $number; }
+
         $response = $this->get('/pbxcore/api/v3/cdr', $params);
 
-        // Only return records that have a recording file
-        $data = $response['data'] ?? $response;
-        if (is_array($data)) {
-            $response['data'] = array_values(array_filter(
-                $data,
-                fn($r) => ! empty($r['recordingfile']) || ! empty($r['playback_url'])
-            ));
+        // Real structure: data.records[group].records[channel_leg]
+        $groups = $response['data']['records'] ?? [];
+        $flat   = [];
+
+        foreach ($groups as $group) {
+            foreach ($group['records'] ?? [] as $rec) {
+                $merged = array_merge([
+                    'src_num'     => $group['src_num']     ?? '',
+                    'dst_num'     => $group['dst_num']     ?? '',
+                    'src_name'    => $group['src_name']    ?? '',
+                    'dst_name'    => $group['dst_name']    ?? '',
+                    'linkedid'    => $group['linkedid']    ?? '',
+                    'disposition' => $group['disposition'] ?? '',
+                ], $rec);
+
+                if (! empty($merged['playback_url']) || ! empty($merged['recordingfile'])) {
+                    $flat[] = $merged;
+                }
+            }
         }
-        return $response;
+
+        return ['result' => $response['result'] ?? true, 'data' => $flat, 'total' => count($flat)];
     }
+
 
     /**
      * Get playback URL for a CDR recording.

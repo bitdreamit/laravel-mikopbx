@@ -10,9 +10,16 @@ class RecordingService
     public function __construct(private RestApiService $api) {}
 
     /**
-     * List CDR records that have recordings.
-     * Uses GET /pbxcore/api/v3/cdr with date/number filters.
-     * Only returns records with a recordingfile or playback_url.
+     * List recordings — returns flattened inner channel records that have playback_url.
+     *
+     * Real response field names from actual API:
+     *   src_num, dst_num  — caller/callee numbers
+     *   start             — call start time
+     *   billsec           — answered duration in seconds
+     *   playback_url      — "/pbxcore/api/v3/cdr:playback?token=abc123"
+     *   download_url      — "/pbxcore/api/v3/cdr:download?token=abc123"
+     *   recordingfile     — full server path e.g. "/storage/usbdisk1/.../.webm"
+     *   UNIQUEID          — unique call identifier
      */
     public function list(string $from, string $to, string $number = ''): array
     {
@@ -20,69 +27,78 @@ class RecordingService
     }
 
     /**
-     * Proxy stream a recording from MikoPBX through Laravel.
-     * Accepts either a CDR record ID (integer) or a filename string.
+     * Build the full playback URL.
      *
-     * The MikoPBX v3 API returns pre-signed playback_url in each CDR record.
-     * Use that URL directly when available.
+     * The API returns relative URLs like:
+     *   /pbxcore/api/v3/cdr:playback?token=ac95731c81a42a13fc28a8d8de48a594
+     *
+     * We prepend the MikoPBX base URL to make it absolute.
+     *
+     * @param string $relativeUrl  The playback_url from the CDR record
      */
-    public function proxyStream(string $filenameOrId): \Symfony\Component\HttpFoundation\StreamedResponse
+    public function buildPlaybackUrl(string $relativeUrl): string
     {
-        // Try to find the CDR record to get the pre-signed URL
-        $playbackUrl = null;
+        if (empty($relativeUrl)) return '';
 
-        if (is_numeric($filenameOrId)) {
-            try {
-                $cdr = $this->api->getCDRById((int) $filenameOrId);
-                $playbackUrl = $cdr['data']['playback_url'] ?? null;
-            } catch (\Throwable) {}
-        }
+        // Already absolute
+        if (str_starts_with($relativeUrl, 'http')) return $relativeUrl;
 
-        // Fall back to local DB lookup by recording_file
-        if (! $playbackUrl) {
-            $log = CallLog::where('recording_file', $filenameOrId)->first();
-            $playbackUrl = $log?->recording_url;
-        }
+        $base = rtrim(config('mikopbx.url', ''), '/');
+        return $base . $relativeUrl;
+    }
 
-        // Last resort: build URL from the legacy endpoint
-        if (! $playbackUrl) {
-            $playbackUrl = $this->api->getRecordingUrl($filenameOrId);
+    /**
+     * Proxy-stream a recording through Laravel.
+     * Uses the token-based playback_url returned by the API.
+     * Accepts either:
+     *   - A relative URL:  /pbxcore/api/v3/cdr:playback?token=xxx
+     *   - A full URL:      https://pbx.htncr.org/pbxcore/api/v3/cdr:playback?token=xxx
+     *   - A legacy filename: mikopbx-xxx.webm
+     */
+    public function proxyStream(string $urlOrFilename): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        // Determine the full URL to fetch from MikoPBX
+        if (str_starts_with($urlOrFilename, '/pbxcore/')) {
+            // Relative playback_url from API — just prepend base URL
+            $fullUrl = rtrim(config('mikopbx.url', ''), '/') . $urlOrFilename;
+        } elseif (str_starts_with($urlOrFilename, 'http')) {
+            $fullUrl = $urlOrFilename;
+        } else {
+            // Legacy filename — try to find in local DB
+            $log = CallLog::where('recording_file', $urlOrFilename)->first();
+            if ($log?->recording_url) {
+                $fullUrl = $this->buildPlaybackUrl($log->recording_url);
+            } else {
+                // Fallback: try the old-style URL
+                $fullUrl = rtrim(config('mikopbx.url', ''), '/') .
+                           '/pbxcore/api/v3/cdr:playback?filename=' . urlencode($urlOrFilename);
+            }
         }
 
         $apiKey = config('mikopbx.api_key');
 
-        return response()->stream(function () use ($playbackUrl, $apiKey) {
-            $stream = Http::withHeaders(['Authorization' => "Bearer {$apiKey}"])
+        return response()->stream(function () use ($fullUrl, $apiKey) {
+            $response = Http::withHeaders(['Authorization' => "Bearer {$apiKey}"])
                 ->withoutVerifying()
-                ->get($playbackUrl)
-                ->toPsrResponse()
-                ->getBody();
+                ->timeout(60)
+                ->get($fullUrl);
 
-            while (! $stream->eof()) {
-                echo $stream->read(8192);
-                flush();
-            }
+            echo $response->body();
+            flush();
         }, 200, [
-            'Content-Type'        => 'audio/wav',
-            'Content-Disposition' => "inline; filename=\"{$filenameOrId}\"",
+            'Content-Type'        => 'audio/webm, audio/wav, audio/*',
+            'Content-Disposition' => 'inline; filename="recording.webm"',
             'Cache-Control'       => 'no-cache',
+            'Accept-Ranges'       => 'bytes',
         ]);
     }
 
     /**
-     * Get a proxied URL for a recording — routes through Laravel for auth.
+     * Get proxied URL routing through Laravel for a recording.
+     * Accepts relative playback_url or filename.
      */
-    public function getSignedUrl(string $filenameOrId): string
+    public function getSignedUrl(string $urlOrFilename): string
     {
-        return route('mikopbx.recordings.play', ['filename' => $filenameOrId]);
-    }
-
-    /**
-     * Get the direct MikoPBX playback URL for a CDR record.
-     * Uses the pre-signed playback_url if available.
-     */
-    public function getDirectUrl(int $cdrId): string
-    {
-        return $this->api->getRecordingPlaybackUrl($cdrId);
+        return route('mikopbx.recordings.play', ['filename' => urlencode($urlOrFilename)]);
     }
 }

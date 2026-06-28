@@ -19,6 +19,13 @@
     {{-- Chart.js (safe — not Alpine) --}}
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 
+    {{--
+        JsSIP — WebRTC SIP client for the browser dialer.
+        Loaded here (before Alpine) so mikopbxApp.init() can access window.JsSIP.
+        MikoPBX requires extensions to register with -WS suffix for WebRTC.
+    --}}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jssip/3.10.0/jssip.min.js"></script>
+
     @livewireStyles
 
     <style>
@@ -49,23 +56,28 @@
 
         function mikopbxApp() {
             return {
+                // ── State ──────────────────────────────────────────────────
                 sysOnline:     true,
                 activeCalls:   0,
                 agentsOnline:  0,
                 dialerOpen:    false,
                 dialString:    '',
                 inCall:        false,
-                callStatus:    '',
+                callStatus:    '',   // ringing | active | failed
                 callTimer:     '00:00',
                 sipRegistered: false,
                 quickDial:     '',
                 _callSec:      0,
                 _timerRef:     null,
+                _ua:           null,   // JsSIP UserAgent
+                _session:      null,   // JsSIP RTCSession
 
                 init() {
+                    // Poll stats every 10s
                     this.pollStats();
                     setInterval(() => this.pollStats(), 10000);
 
+                    // Livewire event bindings
                     document.addEventListener('livewire:initialized', () => {
                         Livewire.on('play-ringtone',  () => {
                             const a = document.getElementById('mikopbx-ringtone');
@@ -85,10 +97,14 @@
                         });
                     });
 
-                    // Allow plain JS to dial: window.mikopbxDial('01711...')
-                    window.mikopbxDial = (num) => this.dial(num);
+                    // Allow any JS on the page to trigger a call
+                    window.mikopbxDial = (num) => this.dial(String(num));
+
+                    // Boot JsSIP after a short delay so DOM is ready
+                    setTimeout(() => this.initSIP(), 500);
                 },
 
+                // ── Statistics polling ───────────────────────────────────
                 async pollStats() {
                     try {
                         const r = await fetch('{{ route("mikopbx.calls.active") }}', {
@@ -107,58 +123,199 @@
                             const d  = await r.json();
                             const ag = d.data ?? d;
                             this.agentsOnline = Array.isArray(ag)
-                                ? ag.filter(a => ['online','busy'].includes(a.status)).length : 0;
+                                ? ag.filter(a => ['online','busy'].includes(a.status)).length
+                                : 0;
                         }
                     } catch {}
                 },
 
+                // ── JsSIP Initialisation ─────────────────────────────────
+                async initSIP() {
+                    if (typeof JsSIP === 'undefined') return;
+
+                    try {
+                        // Fetch SIP config for the current logged-in user
+                        const r = await fetch('{{ route("mikopbx.dialer.config") }}');
+                        if (!r.ok) return;
+                        const cfg = await r.json();
+
+                        if (!cfg.enabled || !cfg.extension) return;
+
+                        /*
+                         * MikoPBX WebRTC config:
+                         *   ws_url:       wss://pbx.htncr.org:8089/asterisk/ws
+                         *   ws_extension: 101-WS   (plain extension + "-WS" suffix)
+                         *   sip_uri:      sip:101-WS@pbx.htncr.org
+                         *   password:     SIP password for this extension
+                         */
+                        JsSIP.debug.disable('JsSIP:*');
+
+                        const socket = new JsSIP.WebSocketInterface(cfg.ws_url);
+
+                        this._ua = new JsSIP.UA({
+                            sockets:          [socket],
+                            uri:              cfg.sip_uri,        // sip:101-WS@pbx.htncr.org
+                            password:         cfg.password,
+                            display_name:     cfg.display_name,
+                            register:         true,
+                            register_expires: 300,
+                            session_timers:   false,
+                            pcConfig: {
+                                iceServers: [{ urls: cfg.stun_server }],
+                            },
+                        });
+
+                        this._ua.on('registered',         () => { this.sipRegistered = true; });
+                        this._ua.on('unregistered',       () => { this.sipRegistered = false; });
+                        this._ua.on('registrationFailed', (e) => {
+                            console.warn('SIP registration failed:', e.cause);
+                            this.sipRegistered = false;
+                        });
+
+                        // Handle incoming WebRTC call from another extension
+                        this._ua.on('newRTCSession', (e) => {
+                            if (e.originator === 'remote') {
+                                this._attachSession(e.session);
+                                const from = e.request?.from?.uri?.user ?? 'Unknown';
+                                this.dialString  = from;
+                                this.callStatus  = 'ringing';
+                                this.inCall      = true;
+                                this.dialerOpen  = true;
+
+                                // Auto-answer incoming call
+                                e.session.answer({ mediaConstraints: { audio: true, video: false } });
+                            }
+                        });
+
+                        this._ua.start();
+
+                    } catch (err) {
+                        console.warn('SIP init error:', err);
+                    }
+                },
+
+                // ── Keypad ──────────────────────────────────────────────
                 pressKey(k)  { this.dialString += k; },
                 clearDial()  { this.dialString = this.dialString.slice(0, -1); },
-                dial(num)    {
+
+                dial(num) {
                     if (!num) return;
                     this.dialString  = String(num);
                     this.dialerOpen  = true;
-                    this.makeCall();
+                    // Small delay so dialer panel opens before call starts
+                    setTimeout(() => this.makeCall(), 150);
                 },
 
+                // ── Call control ─────────────────────────────────────────
                 makeCall() {
                     if (!this.dialString) return;
+
                     this.callStatus = 'ringing';
                     this.inCall     = true;
                     this._callSec   = 0;
+                    this.callTimer  = '00:00';
                     clearInterval(this._timerRef);
-                    this._timerRef  = setInterval(() => {
+
+                    this._timerRef = setInterval(() => {
                         this._callSec++;
                         const m = String(Math.floor(this._callSec / 60)).padStart(2, '0');
                         const s = String(this._callSec % 60).padStart(2, '0');
                         this.callTimer = `${m}:${s}`;
                     }, 1000);
 
-                    fetch('{{ route("mikopbx.calls.originate") }}', {
-                        method:  'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
-                        },
-                        body: JSON.stringify({ from: '{{ auth()->user()?->email ?? "101" }}', to: this.dialString })
-                    })
-                    .then(r => r.json())
-                    .then(d => {
-                        this.callStatus = d.success ? 'active' : 'failed';
-                        if (!d.success) this.endCall();
-                    })
-                    .catch(() => { this.callStatus = 'failed'; this.endCall(); });
+                    if (this.sipRegistered && this._ua) {
+                        // ── WebRTC call via JsSIP ──────────────────────────
+                        // This makes a real browser-to-browser SIP call
+                        // MikoPBX connects the WebRTC call to the PSTN/extension
+                        try {
+                            const server = this._ua.configuration?.uri?.host ?? '';
+                            const session = this._ua.call(`sip:${this.dialString}@${server}`, {
+                                mediaConstraints: { audio: true, video: false },
+                                rtcOfferConstraints: { offerToReceiveAudio: true, offerToReceiveVideo: false },
+                            });
+                            this._attachSession(session);
+                        } catch (err) {
+                            console.error('JsSIP call error:', err);
+                            this.callStatus = 'failed';
+                            this.endCall();
+                        }
+                    } else {
+                        // ── Fallback: Click-to-call via AMI (server-side) ──
+                        // When SIP not registered, we ask the server to originate
+                        // the call: MikoPBX rings the agent's desk phone first,
+                        // then connects to the destination when answered.
+                        fetch('{{ route("mikopbx.calls.originate") }}', {
+                            method:  'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                            },
+                            body: JSON.stringify({
+                                from: '{{ auth()->user()?->pbx_extension ?? "101" }}',
+                                to:   this.dialString,
+                            }),
+                        })
+                        .then(r => r.json())
+                        .then(d => {
+                            this.callStatus = d.success ? 'active' : 'failed';
+                            if (!d.success) {
+                                clearInterval(this._timerRef);
+                                this.inCall = false;
+                                document.dispatchEvent(new CustomEvent('mikopbx:add-toast', {
+                                    detail: { type: 'error', msg: d.message ?? 'Call failed' }
+                                }));
+                            }
+                        })
+                        .catch(() => {
+                            this.callStatus = 'failed';
+                            this.endCall();
+                        });
+                    }
                 },
 
                 endCall() {
+                    this._session?.terminate?.();
+                    this._session = null;
                     clearInterval(this._timerRef);
                     this.inCall     = false;
                     this.callStatus = '';
                     this.callTimer  = '00:00';
                     this._callSec   = 0;
                 },
+
+                // ── JsSIP session helpers ────────────────────────────────
+                _attachSession(session) {
+                    this._session = session;
+
+                    session.on('confirmed', () => {
+                        this.callStatus = 'active';
+                    });
+
+                    session.on('ended', () => {
+                        this.callStatus = 'ended';
+                        setTimeout(() => this.endCall(), 1500);
+                    });
+
+                    session.on('failed', (e) => {
+                        this.callStatus = 'failed';
+                        console.warn('Call failed:', e.cause);
+                        setTimeout(() => this.endCall(), 2000);
+                    });
+
+                    // Route remote audio to <audio> element
+                    session.on('peerconnection', (e) => {
+                        e.peerconnection.addEventListener('track', (trackEvent) => {
+                            const audioEl = document.getElementById('mikopbx-remote-audio');
+                            if (audioEl && trackEvent.streams[0]) {
+                                audioEl.srcObject = trackEvent.streams[0];
+                                audioEl.play().catch(() => {});
+                            }
+                        });
+                    });
+                },
             };
         }
+
 
         function toastManager() {
             return {
@@ -253,20 +410,43 @@
                 currentFile:  '',
                 currentLabel: '',
                 playing:      false,
-                play(filename, label) {
-                    if (this.currentFile === filename) {
-                        const p = document.getElementById('recording-player');
-                        this.playing ? p.pause() : p.play();
+
+                /**
+                 * Play a recording.
+                 *
+                 * @param {string} key   — either a relative playback_url
+                 *                         e.g. "/pbxcore/api/v3/cdr:playback?token=abc123"
+                 *                         or a legacy filename e.g. "mikopbx-xxx.webm"
+                 * @param {string} label — display label for the sticky player
+                 *
+                 * The key is passed to our Laravel proxy route which adds Bearer auth
+                 * and streams the audio from MikoPBX.
+                 */
+                play(key, label) {
+                    const player = document.getElementById('recording-player');
+                    if (!player) return;
+
+                    // Toggle pause/resume if same file
+                    if (this.currentFile === key) {
+                        this.playing ? player.pause() : player.play().catch(() => {});
                         return;
                     }
-                    this.currentFile  = filename;
+
+                    this.currentFile  = key;
                     this.currentLabel = label;
-                    this.$nextTick(() => {
-                        const p = document.getElementById('recording-player');
-                        p.src = `/{{ config('mikopbx.route_prefix','pbx') }}/recordings/play?filename=${encodeURIComponent(filename)}`;
-                        p.play();
-                        this.playing = true;
-                    });
+                    this.playing      = false;
+
+                    // Build proxy URL — Laravel route adds Bearer auth header
+                    const proxyUrl = `/{{ config('mikopbx.route_prefix','pbx') }}/recordings/play?filename=${encodeURIComponent(key)}`;
+
+                    player.src = proxyUrl;
+                    player.load();
+                    player.play()
+                        .then(() => { this.playing = true; })
+                        .catch(err => {
+                            console.warn('Audio play failed:', err);
+                            this.playing = false;
+                        });
                 }
             };
         }
@@ -592,8 +772,15 @@
     </template>
 </div>
 
-{{-- Ringtone audio element --}}
+{{-- Ringtone audio — played for incoming call alert --}}
 <audio id="mikopbx-ringtone" loop preload="none" src="/vendor/mikopbx/ringtone.mp3"></audio>
+
+{{--
+    Remote audio — receives the actual voice stream from JsSIP WebRTC.
+    JsSIP sets srcObject on this element when a call is connected.
+    Must be in the DOM at all times (autoplay attribute required).
+--}}
+<audio id="mikopbx-remote-audio" autoplay playsinline></audio>
 
 {{--
     @livewireScripts must come LAST — it boots Livewire AND Alpine.
