@@ -20,7 +20,6 @@
                     {{ $call->started_at?->format('d M Y, H:i:s') }}
                 </p>
             </div>
-            {{-- FIX: @match cannot be inline inside class="". Use @php variable. --}}
             @php
                 $statusBadge = match($call->status) {
                     'answered' => 'bg-green-100 text-green-800',

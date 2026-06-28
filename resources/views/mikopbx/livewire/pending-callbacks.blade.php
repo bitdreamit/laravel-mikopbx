@@ -17,7 +17,6 @@
         </thead>
         <tbody class="divide-y divide-gray-50">
             @forelse($callbacks as $cb)
-            {{-- FIX: @match inline replaced with @php variable --}}
             @php
                 $priorityBadge = match($cb->priority) {
                     'urgent' => 'bg-red-100 text-red-800',

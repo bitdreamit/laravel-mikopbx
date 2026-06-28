@@ -169,10 +169,6 @@
             </div>
 
             {{-- Recent Calls --}}
-            {{--
-                FIX: @match cannot be used inline inside a class string.
-                Use a PHP variable or ternary instead.
-            --}}
             <div class="bg-white rounded-xl shadow-sm border border-gray-100">
                 <div class="border-b border-gray-100 px-4 py-3 flex items-center justify-between">
                     <h3 class="font-semibold text-gray-900 text-sm">Recent Calls</h3>

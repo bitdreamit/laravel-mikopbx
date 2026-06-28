@@ -48,7 +48,6 @@
                 </thead>
                 <tbody class="divide-y divide-gray-50">
                     @forelse($calls as $call)
-                    {{-- FIX: @match inside class strings is invalid. Use @php variables. --}}
                     @php
                         $dirBadge = match($call->direction) {
                             'inbound'  => 'bg-blue-50 text-blue-700',

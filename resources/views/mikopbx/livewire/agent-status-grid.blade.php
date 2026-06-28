@@ -27,7 +27,6 @@
     @else
         <div class="grid grid-cols-2 gap-0 divide-y divide-gray-50 max-h-52 overflow-y-auto">
             @foreach($agents as $agent)
-            {{-- FIX: No inline Alpine ternary needed — compute dot class in PHP --}}
             @php
                 $dot = match($agent['status'] ?? 'offline') {
                     'online'  => 'bg-green-400',
