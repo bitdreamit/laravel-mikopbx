@@ -87,7 +87,12 @@
                         </td>
                         <td class="px-4 py-3">
                             <div class="flex items-center gap-2">
-                                @if($call->recording_file)
+                                @if($call->recording_url)
+                                    <a href="{{ route('mikopbx.recordings.play', ['filename' => $call->recording_url]) }}"
+                                       target="_blank"
+                                       class="text-xs text-indigo-600 hover:text-indigo-800"
+                                       title="Play recording">▶</a>
+                                @elseif($call->recording_file)
                                     <a href="{{ route('mikopbx.recordings.play', ['filename' => $call->recording_file]) }}"
                                        target="_blank"
                                        class="text-xs text-indigo-600 hover:text-indigo-800"

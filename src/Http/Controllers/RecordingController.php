@@ -53,6 +53,7 @@ class RecordingController extends Controller
         $baseUrl = rtrim(config('mikopbx.url', ''), '/');
         $apiKey  = config('mikopbx.api_key', '');
 
+
         // Build the full URL to fetch from MikoPBX
         if (str_starts_with($filename, '/pbxcore/')) {
             // Relative playback_url from API e.g. /pbxcore/api/v3/cdr:playback?token=xxx
