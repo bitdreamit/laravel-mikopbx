@@ -78,5 +78,8 @@ Route::post('/ivr/save',             [IVRController::class, 'save'])->name('ivr.
 Route::get('/health',                [HealthController::class, 'index'])->name('health.index');
 Route::post('/health/check',         [HealthController::class, 'check'])->name('health.check');
 
-// Web Dialer SIP config
-Route::get('/dialer/config',         [WebDialerController::class, 'config'])->name('dialer.config');
+// Web Dialer SIP config + debug
+Route::get('/dialer/config', [WebDialerController::class, 'config'])->name('dialer.config');
+Route::get('/dialer/debug',  function () {
+    return view('mikopbx::partials.dialer-debug');
+})->name('dialer.debug');

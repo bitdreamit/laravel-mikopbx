@@ -148,13 +148,25 @@
                          *   sip_uri:      sip:101-WS@pbx.htncr.org
                          *   password:     SIP password for this extension
                          */
-                        JsSIP.debug.disable('JsSIP:*');
+                        // ── Enable JsSIP debug logging to browser console ─────
+                        // Open DevTools → Console to see all SIP messages
+                        JsSIP.debug.enable('JsSIP:*');
+
+                        console.log('[MikoPBX Dialer] Config received:', {
+                            ws_url:       cfg.ws_url,
+                            sip_uri:      cfg.sip_uri,
+                            ws_extension: cfg.ws_extension,
+                            sip_server:   cfg.sip_server,
+                        });
 
                         const socket = new JsSIP.WebSocketInterface(cfg.ws_url);
 
+                        // Log WebSocket events
+                        socket.via_transport = 'WSS';
+
                         this._ua = new JsSIP.UA({
                             sockets:          [socket],
-                            uri:              cfg.sip_uri,        // sip:101-WS@pbx.htncr.org
+                            uri:              cfg.sip_uri,
                             password:         cfg.password,
                             display_name:     cfg.display_name,
                             register:         true,
@@ -165,28 +177,63 @@
                             },
                         });
 
-                        this._ua.on('registered',         () => { this.sipRegistered = true; });
-                        this._ua.on('unregistered',       () => { this.sipRegistered = false; });
-                        this._ua.on('registrationFailed', (e) => {
-                            console.warn('SIP registration failed:', e.cause);
-                            this.sipRegistered = false;
+                        this._ua.on('connecting', (e) => {
+                            console.log('[MikoPBX Dialer] WebSocket connecting to:', cfg.ws_url);
+                            this._setDialerStatus('connecting…', 'yellow');
                         });
 
-                        // Handle incoming WebRTC call from another extension
+                        this._ua.on('connected', (e) => {
+                            console.log('[MikoPBX Dialer] WebSocket connected ✅');
+                            this._setDialerStatus('connected, registering…', 'yellow');
+                        });
+
+                        this._ua.on('disconnected', (e) => {
+                            console.error('[MikoPBX Dialer] WebSocket DISCONNECTED ❌', {
+                                error: e.error,
+                                code:  e.code,
+                                reason:e.reason,
+                            });
+                            this.sipRegistered = false;
+                            this._setDialerStatus('WS disconnected: ' + (e.reason || e.code), 'red');
+                        });
+
+                        this._ua.on('registered', (e) => {
+                            console.log('[MikoPBX Dialer] SIP Registered ✅ as', cfg.sip_uri);
+                            this.sipRegistered = true;
+                            this._setDialerStatus('registered', 'green');
+                        });
+
+                        this._ua.on('unregistered', (e) => {
+                            console.warn('[MikoPBX Dialer] SIP Unregistered', e);
+                            this.sipRegistered = false;
+                            this._setDialerStatus('unregistered', 'gray');
+                        });
+
+                        this._ua.on('registrationFailed', (e) => {
+                            console.error('[MikoPBX Dialer] Registration FAILED ❌', {
+                                cause:    e.cause,
+                                response: e.response?.status_code,
+                                reason:   e.response?.reason_phrase,
+                            });
+                            this.sipRegistered = false;
+                            this._setDialerStatus('reg failed: ' + e.cause, 'red');
+                        });
+
+                        // Handle incoming WebRTC call
                         this._ua.on('newRTCSession', (e) => {
+                            console.log('[MikoPBX Dialer] New RTC session, originator:', e.originator);
                             if (e.originator === 'remote') {
                                 this._attachSession(e.session);
                                 const from = e.request?.from?.uri?.user ?? 'Unknown';
-                                this.dialString  = from;
-                                this.callStatus  = 'ringing';
-                                this.inCall      = true;
-                                this.dialerOpen  = true;
-
-                                // Auto-answer incoming call
+                                this.dialString = from;
+                                this.callStatus = 'ringing';
+                                this.inCall     = true;
+                                this.dialerOpen = true;
                                 e.session.answer({ mediaConstraints: { audio: true, video: false } });
                             }
                         });
 
+                        console.log('[MikoPBX Dialer] Starting JsSIP UA…');
                         this._ua.start();
 
                     } catch (err) {
@@ -281,6 +328,21 @@
                     this.callStatus = '';
                     this.callTimer  = '00:00';
                     this._callSec   = 0;
+                },
+
+                // ── Debug status helper ──────────────────────────────────
+                _setDialerStatus(msg, color) {
+                    // Updates a small debug line under the dialer dot
+                    const el = document.getElementById('mikopbx-dialer-debug');
+                    if (el) {
+                        el.textContent = msg;
+                        el.className   = 'text-xs mt-1 ' + {
+                            green:  'text-green-300',
+                            yellow: 'text-yellow-300',
+                            red:    'text-red-300',
+                            gray:   'text-gray-400',
+                        }[color] || 'text-gray-400';
+                    }
                 },
 
                 // ── JsSIP session helpers ────────────────────────────────
@@ -687,12 +749,21 @@
 <div x-show="dialerOpen" x-cloak
      class="fixed bottom-0 right-0 w-72 bg-white border border-gray-200 shadow-2xl rounded-tl-2xl z-50">
     <div class="p-4 border-b border-gray-100 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full"
-                  :class="sipRegistered ? 'bg-green-400 pulse-green' : 'bg-gray-300'"></span>
-            <span class="text-sm font-semibold text-gray-800">Web Dialer</span>
+        <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      :class="sipRegistered ? 'bg-green-400 pulse-green' : 'bg-gray-300'"></span>
+                <span class="text-sm font-semibold text-gray-800">Web Dialer</span>
+                <span class="text-xs ml-1"
+                      :class="sipRegistered ? 'text-green-600' : 'text-gray-400'"
+                      x-text="sipRegistered ? '✓ Ready' : '○ Offline'"></span>
+            </div>
+            {{-- Debug status line — shows exact SIP registration state --}}
+            <p id="mikopbx-dialer-debug" class="text-xs text-gray-400 ml-4 mt-0.5">
+                loading config…
+            </p>
         </div>
-        <button @click="dialerOpen = false" class="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+        <button @click="dialerOpen = false" class="text-gray-400 hover:text-gray-600 text-lg leading-none flex-shrink-0">✕</button>
     </div>
 
     <div class="p-4">
