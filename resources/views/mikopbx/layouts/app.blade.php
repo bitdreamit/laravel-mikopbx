@@ -254,14 +254,14 @@
                     session.on('confirmed', () => { this.callStatus = 'active'; });
                     session.on('ended',     () => { this.callStatus = 'ended'; setTimeout(() => this.endCall(), 1500); });
                     session.on('failed',    (e) => { this.callStatus = 'failed'; setTimeout(() => this.endCall(), 2000); });
-                    session.on('peerconnection', (e) => {
-                        e.peerconnection.addEventListener('track', (ev) => {
-                            const audio = document.getElementById('mikopbx-remote-audio');
-                            if (audio && ev.streams[0]) {
-                                audio.srcObject = ev.streams[0];
-                                audio.play().catch(() => {});
-                            }
-                        });
+
+                    session.connection.addEventListener('track', (ev) => {
+                        console.log('[Audio] Track received:', ev.track.kind, ev.streams);
+                        const audio = document.getElementById('mikopbx-remote-audio');
+                        if (audio && ev.streams[0]) {
+                            audio.srcObject = ev.streams[0];
+                            audio.play().catch(e => console.warn('Audio play failed:', e));
+                        }
                     });
                 },
 
