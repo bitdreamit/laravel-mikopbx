@@ -20,11 +20,20 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 
     {{--
-        JsSIP — WebRTC SIP client for the browser dialer.
-        Loaded here (before Alpine) so mikopbxApp.init() can access window.JsSIP.
-        MikoPBX requires extensions to register with -WS suffix for WebRTC.
+        JsSIP 3.10.0 — WebRTC SIP client for the browser softphone dialer.
+
+        Loaded from /vendor/mikopbx/jssip.min.js (self-hosted, no CDN dependency).
+        Publish it with: php artisan vendor:publish --tag=mikopbx-public
+
+        Must load BEFORE Alpine (before @livewireScripts) so mikopbxApp.init()
+        can access window.JsSIP at boot time.
+
+        MikoPBX WebRTC notes:
+          - Extensions register with -WS suffix: sip:121-WS@pbx.htncr.org
+          - WebSocket path: /asterisk/ws  (NOT /ws)
+          - Port: 8089 (WSS) or 8088 (WS)
     --}}
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jssip/3.10.0/jssip.min.js"></script>
+    <script src="{{ asset('vendor/mikopbx/jssip.min.js') }}"></script>
 
     @livewireStyles
 

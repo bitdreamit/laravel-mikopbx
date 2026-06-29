@@ -7,6 +7,19 @@
 @section('title','Dialer Debug')
 @section('heading','Web Dialer Debug')
 
+@push('scripts')
+{{-- Ensure JsSIP is available on the debug page even if layout load failed --}}
+<script>
+if (typeof JsSIP === 'undefined') {
+    const s = document.createElement('script');
+    s.src = '{{ asset("vendor/mikopbx/jssip.min.js") }}';
+    s.onload  = () => console.log('[Debug] JsSIP loaded via fallback');
+    s.onerror = () => console.error('[Debug] JsSIP fallback also failed — check public/vendor/mikopbx/jssip.min.js');
+    document.head.appendChild(s);
+}
+</script>
+@endpush
+
 @section('content')
 <div class="max-w-2xl space-y-4" x-data="dialerDebug()">
 

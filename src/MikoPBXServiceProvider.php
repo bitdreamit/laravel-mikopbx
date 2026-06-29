@@ -74,6 +74,12 @@ class MikoPBXServiceProvider extends ServiceProvider
             __DIR__.'/../resources/js'  => resource_path('js/mikopbx'),
             __DIR__.'/../resources/css' => resource_path('css/mikopbx'),
         ], 'mikopbx-assets');
+
+        // Publish vendor JS (JsSIP etc.) to public/vendor/mikopbx/
+        // Run: php artisan vendor:publish --tag=mikopbx-public
+        $this->publishes([
+            __DIR__.'/../public/vendor/mikopbx' => public_path('vendor/mikopbx'),
+        ], 'mikopbx-public');
     }
 
     protected function registerRoutes(): void
