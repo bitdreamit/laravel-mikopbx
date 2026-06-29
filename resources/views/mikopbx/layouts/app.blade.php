@@ -174,13 +174,14 @@
                         socket.via_transport = 'WSS';
 
                         this._ua = new JsSIP.UA({
-                            sockets:          [socket],
-                            uri:              cfg.sip_uri,
-                            password:         cfg.password,
-                            display_name:     cfg.display_name,
-                            register:         true,
-                            register_expires: 300,
-                            session_timers:   false,
+                            sockets:             [socket],
+                            uri:                 cfg.sip_uri,
+                            authorization_user:  cfg.extension,   // "121" (plain, no -WS)
+                            password:            cfg.password,
+                            display_name:        cfg.display_name,
+                            register:            true,
+                            register_expires:    300,
+                            session_timers:      false,
                             pcConfig: {
                                 iceServers: [{ urls: cfg.stun_server }],
                             },
@@ -280,20 +281,27 @@
                     }, 1000);
 
                     if (this.sipRegistered && this._ua) {
-                        // ── WebRTC call via JsSIP ──────────────────────────
-                        // This makes a real browser-to-browser SIP call
-                        // MikoPBX connects the WebRTC call to the PSTN/extension
+                        // ── WebRTC call via JsSIP ────────────────────────────
                         try {
                             const server = this._ua.configuration?.uri?.host ?? '';
-                            const session = this._ua.call(`sip:${this.dialString}@${server}`, {
-                                mediaConstraints: { audio: true, video: false },
+                            const target = `sip:${this.dialString}@${server}`;
+                            console.log('[MikoPBX Dialer] Calling:', target);
+
+                            const session = this._ua.call(target, {
+                                mediaConstraints:    { audio: true, video: false },
                                 rtcOfferConstraints: { offerToReceiveAudio: true, offerToReceiveVideo: false },
+                                pcConfig: {
+                                    iceServers: [{ urls: this._ua.configuration?.pcConfig?.iceServers?.[0]?.urls ?? 'stun:stun.l.google.com:19302' }],
+                                },
                             });
                             this._attachSession(session);
                         } catch (err) {
-                            console.error('JsSIP call error:', err);
+                            console.error('[MikoPBX Dialer] Call error:', err);
                             this.callStatus = 'failed';
                             this.endCall();
+                            document.dispatchEvent(new CustomEvent('mikopbx:add-toast', {
+                                detail: { type: 'error', msg: 'Call failed: ' + err.message }
+                            }));
                         }
                     } else {
                         // ── Fallback: Click-to-call via AMI (server-side) ──

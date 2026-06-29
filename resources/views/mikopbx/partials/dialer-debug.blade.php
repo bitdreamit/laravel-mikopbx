@@ -101,10 +101,36 @@ if (typeof JsSIP === 'undefined') {
              x-text="results.sip || 'Click button to test'"></pre>
     </div>
 
+    {{-- Step 6: Make a test call --}}
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-gray-900">Step 6 — Test Call (via registered UA)</h3>
+            <span :class="checks.call === true ? 'text-green-600' :
+                          checks.call === false ? 'text-red-600' : 'text-gray-400'"
+                  x-text="checks.call === true ? '✅ Calling' :
+                           checks.call === false ? '❌ Failed' : '⏳ Not tested'"></span>
+        </div>
+        <div class="flex gap-2 mb-3">
+            <input x-model="testNumber"
+                   placeholder="Extension or number to call e.g. 101 or 01711000000"
+                   class="input flex-1 text-sm">
+            <button @click="testCall()"
+                    :disabled="!checks.sip || !testNumber"
+                    class="btn-primary text-xs whitespace-nowrap">
+                📞 Make Test Call
+            </button>
+        </div>
+        <p class="text-xs text-gray-400 mb-2">
+            Requires Step 5 (SIP Registration) to pass first. Calls via WebRTC — you will hear audio in your browser.
+        </p>
+        <pre class="bg-gray-50 rounded-lg p-3 text-xs max-h-48 overflow-auto"
+             x-text="results.call || 'Enter a number and click Make Test Call'"></pre>
+    </div>
+
     {{-- Run all --}}
     <button @click="runAll()"
             class="w-full btn-primary justify-center py-3">
-        🔍 Run All Checks
+        🔍 Run All Checks (Steps 1–5)
     </button>
 
     {{-- Summary --}}
@@ -118,11 +144,14 @@ if (typeof JsSIP === 'undefined') {
 <script>
 function dialerDebug() {
     return {
-        checks:  { config: null, ws: null, jssip: null, mic: null, sip: null },
-        results: { config: '', ws: '', jssip: '', mic: '', sip: '' },
-        wsUrl:   '',
-        config:  null,
-        summary: '',
+        checks:     { config: null, ws: null, jssip: null, mic: null, sip: null, call: null },
+        results:    { config: '', ws: '', jssip: '', mic: '', sip: '', call: '' },
+        wsUrl:      '',
+        config:     null,
+        summary:    '',
+        testNumber: '',
+        _testUA:    null,
+        _testSession: null,
 
         async runAll() {
             this.summary = '';
@@ -239,12 +268,14 @@ function dialerDebug() {
 
             const socket = new JsSIP.WebSocketInterface(cfg.ws_url);
             const ua = new JsSIP.UA({
-                sockets:          [socket],
-                uri:              cfg.sip_uri,
-                password:         cfg.password,
-                register:         true,
-                register_expires: 30,
-                session_timers:   false,
+                sockets:             [socket],
+                uri:                 cfg.sip_uri,
+                authorization_user:  cfg.extension,   // "121" plain — not "121-WS"
+                password:            cfg.password,
+                display_name:        cfg.display_name ?? cfg.extension,
+                register:            true,
+                register_expires:    30,
+                session_timers:      false,
             });
 
             ua.on('connecting',        () => log('→ WebSocket connecting…'));
@@ -289,6 +320,103 @@ function dialerDebug() {
                     this.checks.sip = false;
                 }
             }, 15000);
+        },
+
+        testCall() {
+            if (!this.config || !this.checks.jssip) {
+                this.results.call = 'Run Steps 1–5 first';
+                return;
+            }
+            if (!this.testNumber) {
+                this.results.call = 'Enter a number to call';
+                return;
+            }
+
+            const cfg = this.config;
+            const log = (msg) => { this.results.call += msg + '\n'; };
+
+            this.results.call = `Calling: sip:${this.testNumber}@${cfg.sip_server}\n`;
+            this.checks.call  = null;
+
+            // Stop previous test UA if any
+            try { this._testUA?.stop(); } catch {}
+
+            const socket = new JsSIP.WebSocketInterface(cfg.ws_url);
+            this._testUA = new JsSIP.UA({
+                sockets:             [socket],
+                uri:                 cfg.sip_uri,
+                authorization_user:  cfg.extension,
+                password:            cfg.password,
+                display_name:        cfg.display_name ?? cfg.extension,
+                register:            true,
+                register_expires:    60,
+                session_timers:      false,
+            });
+
+            this._testUA.on('connected',  () => log('→ WS connected'));
+            this._testUA.on('registered', () => {
+                log('→ Registered ✅ — making call…');
+
+                try {
+                    const target  = `sip:${this.testNumber}@${cfg.sip_server}`;
+                    this._testSession = this._testUA.call(target, {
+                        mediaConstraints:    { audio: true, video: false },
+                        rtcOfferConstraints: { offerToReceiveAudio: true, offerToReceiveVideo: false },
+                    });
+
+                    this._testSession.on('progress', (e) => {
+                        log('→ Call progress: ' + (e.response?.reason_phrase ?? 'Ringing…'));
+                    });
+                    this._testSession.on('confirmed', () => {
+                        log('→ Call ANSWERED ✅ — audio should be playing');
+                        this.checks.call = true;
+                    });
+                    this._testSession.on('failed', (e) => {
+                        log(`→ Call FAILED ❌\n  cause: ${e.cause}\n  status: ${e.message?.status_code} ${e.message?.reason_phrase}`);
+                        this.checks.call = false;
+
+                        if (e.cause === 'Rejected' || e.message?.status_code === 403) {
+                            log('\n🔑 Outbound route may be blocking this call');
+                            log('   Check MikoPBX Admin → Routing → Outbound Routes');
+                        }
+                        if (e.cause === 'Not Found' || e.message?.status_code === 404) {
+                            log('\n📞 Number not found — check extension or outbound route');
+                        }
+                        if (e.cause === 'Request Timeout') {
+                            log('\n⏱ No answer / number unreachable');
+                        }
+                    });
+                    this._testSession.on('ended', (e) => {
+                        log('→ Call ended: ' + (e.cause ?? 'Normal'));
+                    });
+
+                    // Stop test after 30s
+                    setTimeout(() => {
+                        try { this._testSession?.terminate(); this._testUA?.stop(); } catch {}
+                        if (this.checks.call === null) {
+                            log('\n⏱ Call test timeout — no answer in 30s');
+                            this.checks.call = false;
+                        }
+                    }, 30000);
+
+                } catch (err) {
+                    log('→ Call exception: ' + err.message);
+                    this.checks.call = false;
+                }
+            });
+
+            this._testUA.on('registrationFailed', (e) => {
+                log(`→ Registration failed: ${e.cause} ${e.response?.status_code ?? ''}`);
+                this.checks.call = false;
+            });
+            this._testUA.on('disconnected', (e) => {
+                if (this.checks.call === null) {
+                    log(`→ WS disconnected: code=${e.code}`);
+                    this.checks.call = false;
+                }
+            });
+
+            this._testUA.start();
         },
 
         buildSummary() {
