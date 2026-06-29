@@ -1,7 +1,7 @@
 {
     "name": "bitdreamit/laravel-mikopbx",
     "description": "The most complete Laravel package for MikoPBX — CRM-ready call center with auto dialer, campaigns, live agent panel, web softphone, IVR builder, analytics, recordings, blacklist, callbacks & more.",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "type": "library",
     "keywords": ["laravel", "mikopbx", "asterisk", "pbx", "voip", "call-center", "crm", "auto-dialer", "ami", "ari"],
     "homepage": "https://github.com/bitdreamit/laravel-mikopbx",
