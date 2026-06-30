@@ -35,18 +35,20 @@
 
         function mikopbxApp() {
             return {
-                sysOnline:     true,
-                activeCalls:   0,
-                agentsOnline:  0,
-                dialerOpen:    false,
-                dialString:    '',
-                inCall:        false,
-                callStatus:    '',
-                callTimer:     '00:00',
-                sipRegistered: false,
-                quickDial:     '',
-                _callSec:      0,
-                _timerRef:     null,
+                sysOnline:        true,
+                activeCalls:      0,
+                agentsOnline:     0,
+                dialerOpen:       false,
+                dialString:       '',
+                inCall:           false,
+                callStatus:       '',
+                callTimer:        '00:00',
+                sipRegistered:    false,
+                quickDial:        '',
+                _callSec:         0,
+                _timerRef:        null,
+                _lastExtension:   null,   // current user's extension, for status reporting
+                _statusHeartbeat: null,   // interval ID — re-reports "online" every 60s
 
                 init() {
                     this.pollStats();
@@ -128,6 +130,9 @@
                         const cfg = await r.json();
                         if (!cfg.enabled || !cfg.extension) return;
 
+                        // Store for _reportAgentStatus() and beforeunload handler
+                        this._lastExtension = cfg.extension;
+
                         const socket = new JsSIP.WebSocketInterface(cfg.ws_url);
 
                         window._mikopbxUA = new JsSIP.UA({
@@ -147,18 +152,35 @@
                         window._mikopbxUA.on('disconnected', (e) => {
                             this.sipRegistered = false;
                             this._dbgStatus('disconnected: ' + (e.reason || e.code), 'red');
+                            this._reportAgentStatus('offline');
+                            clearInterval(this._statusHeartbeat);
                         });
                         window._mikopbxUA.on('registered', () => {
                             this.sipRegistered = true;
                             this._dbgStatus('registered', 'green');
+                            // Push "online" to the server so AgentStatusGrid shows this
+                            // user's extension as online — REST API peer status alone
+                            // doesn't reliably reflect WebRTC (-WS) registrations.
+                            this._reportAgentStatus('online');
+                            // Keep re-reporting status every 60s so it doesn't expire
+                            // from the server-side browser-trust window.
+                            clearInterval(this._statusHeartbeat);
+                            this._statusHeartbeat = setInterval(() => {
+                                if (this.sipRegistered) {
+                                    this._reportAgentStatus(this.inCall ? 'busy' : 'online');
+                                }
+                            }, 60000);
                         });
                         window._mikopbxUA.on('unregistered', () => {
                             this.sipRegistered = false;
                             this._dbgStatus('unregistered', 'gray');
+                            this._reportAgentStatus('offline');
+                            clearInterval(this._statusHeartbeat);
                         });
                         window._mikopbxUA.on('registrationFailed', (e) => {
                             this.sipRegistered = false;
                             this._dbgStatus('reg failed: ' + e.cause, 'red');
+                            this._reportAgentStatus('offline');
                         });
                         window._mikopbxUA.on('newRTCSession', (e) => {
                             if (e.originator === 'remote') {
@@ -169,11 +191,27 @@
                                 this.callStatus = 'ringing';
                                 this.inCall     = true;
                                 this.dialerOpen = true;
+                                this._reportAgentStatus('busy');
                                 e.session.answer({ mediaConstraints: { audio: true, video: false } });
                             }
                         });
 
                         window._mikopbxUA.start();
+
+                        // Mark offline when the tab/window closes, so the agent
+                        // doesn't stay "online" forever after closing the browser.
+                        window.addEventListener('beforeunload', () => {
+                            if (this.sipRegistered && this._lastExtension) {
+                                const fd = new FormData();
+                                fd.append('extension', this._lastExtension);
+                                fd.append('status', 'offline');
+                                fd.append('_token', document.querySelector('meta[name="csrf-token"]').content);
+                                navigator.sendBeacon(
+                                    '{{ route("mikopbx.agents.web-dialer-status") }}',
+                                    fd
+                                );
+                            }
+                        });
                     } catch (err) {
                         console.warn('SIP init error:', err);
                     }
@@ -251,9 +289,20 @@
                 },
 
                 _attachSession(session) {
+                    this._reportAgentStatus('busy');
+
                     session.on('confirmed', () => { this.callStatus = 'active'; });
-                    session.on('ended',     () => { this.callStatus = 'ended'; setTimeout(() => this.endCall(), 1500); });
-                    session.on('failed',    (e) => { this.callStatus = 'failed'; setTimeout(() => this.endCall(), 2000); });
+                    session.on('ended',     () => {
+                        this.callStatus = 'ended';
+                        // Back to "online" once the call finishes
+                        if (this.sipRegistered) this._reportAgentStatus('online');
+                        setTimeout(() => this.endCall(), 1500);
+                    });
+                    session.on('failed',    (e) => {
+                        this.callStatus = 'failed';
+                        if (this.sipRegistered) this._reportAgentStatus('online');
+                        setTimeout(() => this.endCall(), 2000);
+                    });
 
                     session.connection.addEventListener('track', (ev) => {
                         console.log('[Audio] Track received:', ev.track.kind, ev.streams);
@@ -263,6 +312,24 @@
                             audio.play().catch(e => console.warn('Audio play failed:', e));
                         }
                     });
+                },
+
+                // ── Report agent online/busy/offline status to server ────────
+                // Called whenever JsSIP registration or call state changes.
+                // This is what makes AgentStatusGrid show this user as online.
+                _reportAgentStatus(status) {
+                    const ext = this._lastExtension;
+                    if (!ext) return;
+
+                    fetch('{{ route("mikopbx.agents.web-dialer-status") }}', {
+                        method:  'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                        },
+                        body: JSON.stringify({ extension: ext, status }),
+                        keepalive: true,
+                    }).catch(() => { /* non-critical, ignore failures */ });
                 },
 
                 _dbgStatus(msg, color) {

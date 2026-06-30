@@ -13,7 +13,19 @@ class AgentService
      *
      * SIP state values from real API (sip:getPeersStatuses):
      *   OK | REGISTERED | UNREACHABLE | LAGGED | UNKNOWN | OFF
+     *
+     * IMPORTANT — WebRTC (-WS) extensions:
+     * The MikoPBX peer status endpoint often does not cleanly reflect
+     * WebRTC/-WS registrations the same way it does for desk phones.
+     * To avoid the web dialer flickering offline on every poll, we only
+     * let the AMI-derived status OVERWRITE the local status if the local
+     * status was NOT updated recently by the browser itself
+     * (see AgentController::webDialerStatus). A "recent" browser update
+     * is trusted for 90 seconds — after that, AMI/SIP poll data takes over
+     * again (e.g. if the browser tab was closed without firing offline).
      */
+    private const BROWSER_STATUS_TRUST_SECONDS = 90;
+
     public function all(): \Illuminate\Database\Eloquent\Collection
     {
         $agents = Extension::orderBy('extension')->get();
@@ -27,6 +39,16 @@ class AgentService
         }
 
         return $agents->map(function ($agent) use ($statuses) {
+
+            // If the browser reported a status in the last N seconds, trust it
+            // and skip the AMI overwrite (prevents flicker on WebRTC peers).
+            $recentlyReportedByBrowser = $agent->last_seen_at
+                && $agent->last_seen_at->gt(now()->subSeconds(self::BROWSER_STATUS_TRUST_SECONDS));
+
+            if ($recentlyReportedByBrowser) {
+                return $agent;
+            }
+
             $live = $statuses->get($agent->sip_peer ?? $agent->extension);
 
             if ($live) {
@@ -66,15 +88,10 @@ class AgentService
                 $extNum = trim($item['value'] ?? '');
                 if (empty($extNum)) continue;
 
-                // Strip any HTML tags MikoPBX may include in display names
                 $rawName = $item['text'] ?? $extNum;
                 $name    = strip_tags($rawName);
-
-                // Remove extension number prefix from display name
-                // "101 John Smith" → "John Smith"
-                // "101" → "101" (keep if no name follows)
-                $name = preg_replace('/^' . preg_quote($extNum, '/') . '\s+/', '', $name);
-                $name = trim($name) ?: $extNum;
+                $name    = preg_replace('/^' . preg_quote($extNum, '/') . '\s+/', '', $name);
+                $name    = trim($name) ?: $extNum;
 
                 Extension::updateOrCreate(
                     ['extension' => $extNum],
@@ -97,7 +114,10 @@ class AgentService
 
     public function setStatus(string $extension, string $status): void
     {
-        Extension::where('extension', $extension)->update(['status' => $status]);
+        Extension::where('extension', $extension)->update([
+            'status'       => $status,
+            'last_seen_at' => $status !== 'offline' ? now() : now(),
+        ]);
     }
 
     public function getOnlineCount(): int

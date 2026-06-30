@@ -42,6 +42,7 @@ Route::get('/campaigns/{campaign}/progress',  [CampaignController::class, 'progr
 Route::get('/agents',                 [AgentController::class, 'index'])->name('agents.index');
 Route::get('/agents/statuses',        [AgentController::class, 'statuses'])->name('agents.statuses');
 Route::post('/agents/status',         [AgentController::class, 'setStatus'])->name('agents.status');
+Route::post('/agents/web-dialer-status', [AgentController::class, 'webDialerStatus'])->name('agents.web-dialer-status');
 Route::post('/agents/sync',           [AgentController::class, 'sync'])->name('agents.sync');
 
 // Analytics
