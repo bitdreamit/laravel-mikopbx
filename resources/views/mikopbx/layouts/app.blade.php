@@ -53,6 +53,37 @@
                 incomingFrom:     '',     // caller number/extension shown on the popup
 
                 init() {
+                    // ── CRITICAL GUARD ──────────────────────────────────────
+                    // x-data="mikopbxApp()" is on <body>, the page's Alpine root.
+                    // Other Livewire components on this page poll frequently
+                    // (live-call-board every 5s, agent-status-grid every 10s,
+                    // campaign-manager every 8s, pending-callbacks every 15s,
+                    // health-monitor every 60s). In some Alpine/Livewire combos,
+                    // a polled component's DOM morph can cause Alpine to re-walk
+                    // and re-init ancestor x-data scopes, which re-runs this
+                    // init() function.
+                    //
+                    // Without this guard, every re-run:
+                    //   1. Registers a NEW Livewire.on('click-to-call', ...)
+                    //      listener — these STACK (Livewire.on never replaces),
+                    //      so one click ends up calling dial() 2x/3x/Nx →
+                    //      multiple simultaneous outbound calls to one number.
+                    //   2. Calls initSIP() again → creates a 2nd/3rd JsSIP.UA,
+                    //      each registering the same extension. Incoming
+                    //      newRTCSession events then fire against whichever UA
+                    //      instance's closure is stale/detached from the live
+                    //      DOM, so this.incomingCall=true updates a scope
+                    //      nothing is bound to → no popup, no ring.
+                    //
+                    // This single window-level flag makes the entire init()
+                    // body idempotent — it will only ever fully execute once
+                    // per page load, no matter how many times Alpine calls it.
+                    if (window._mikopbxAppInitialized) {
+                        console.warn('[MikoPBX] mikopbxApp.init() called again — skipping duplicate setup (this is expected and safe).');
+                        return;
+                    }
+                    window._mikopbxAppInitialized = true;
+
                     this.pollStats();
                     setInterval(() => this.pollStats(), 10000);
 
@@ -126,11 +157,29 @@
 
                 async initSIP() {
                     if (typeof JsSIP === 'undefined') return;
+
+                    // ── CRITICAL GUARD ──────────────────────────────────────
+                    // x-data="mikopbxApp()" lives on <body>. Frequent
+                    // wire:poll updates from other Livewire components
+                    // (live-call-board polls every 5s) can cause Alpine to
+                    // re-walk/re-init the body root in some Alpine/Livewire
+                    // version combinations, which re-runs init() → initSIP().
+                    // Without this guard that creates 2nd/3rd JsSIP.UA
+                    // instances, each registering separately — causing
+                    // duplicate outbound calls and incoming events firing
+                    // on a stale/torn-down Alpine scope (so no popup/ring).
+                    if (window._mikopbxUA) {
+                        console.warn('[MikoPBX Dialer] initSIP() called again — UA already exists, skipping to prevent duplicate registration.');
+                        this.sipRegistered = window._mikopbxUA.isRegistered?.() ?? this.sipRegistered;
+                        return;
+                    }
+                    window._mikopbxUA = 'initializing'; // claim the slot immediately (sync, before any await resumes)
+
                     try {
                         const r = await fetch('{{ route("mikopbx.dialer.config") }}');
-                        if (!r.ok) return;
+                        if (!r.ok) { window._mikopbxUA = null; return; }
                         const cfg = await r.json();
-                        if (!cfg.enabled || !cfg.extension) return;
+                        if (!cfg.enabled || !cfg.extension) { window._mikopbxUA = null; return; }
 
                         // Store for _reportAgentStatus() and beforeunload handler
                         this._lastExtension = cfg.extension;
@@ -223,6 +272,7 @@
                         });
                     } catch (err) {
                         console.warn('SIP init error:', err);
+                        window._mikopbxUA = null; // release the guard so a later retry can work
                     }
                 },
 
@@ -754,7 +804,7 @@
     </template>
 </div>
 
-<audio id="mikopbx-ringtone" loop preload="none" src="/vendor/mikopbx/ringtone.mp3"></audio>
+<audio id="mikopbx-ringtone" loop preload="auto" src="/vendor/mikopbx/ringtone.mp3"></audio>
 <audio id="mikopbx-remote-audio" autoplay playsinline></audio>
 
 @livewireScripts

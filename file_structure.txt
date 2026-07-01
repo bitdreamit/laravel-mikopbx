@@ -1,0 +1,204 @@
+Folder PATH listing for volume SOFTWARE
+Volume serial number is FE06-DD3B
+D:.
+|   CHANGELOG.md
+|   composer.json
+|   file_structure.txt
+|   README.md
+|   
++---config
+|       mikopbx.php
+|       
++---database
+|   \---migrations
+|           2026_01_01_000001_create_mikopbx_tables.php
+|           2026_01_01_000002_add_pbx_fields_to_users_table.php
+|           
++---public
+|   \---vendor
+|       \---mikopbx
+|               jssip.min.js
+|               ringtone.mp3
+|               ringtone2.mp3
+|               
++---resources
+|   +---css
+|   |       mikopbx.css
+|   |       
+|   +---js
+|   |   \---mikopbx
+|   |           app.js
+|   |           click-to-call.js
+|   |           echo-listeners.js
+|   |           
+|   \---views
+|       \---mikopbx
+|           +---agents
+|           |       index.blade.php
+|           |       
+|           +---analytics
+|           |       index.blade.php
+|           |       
+|           +---blacklist
+|           |       index.blade.php
+|           |       
+|           +---callbacks
+|           |       index.blade.php
+|           |       
+|           +---calls
+|           |       index.blade.php
+|           |       show.blade.php
+|           |       
+|           +---campaigns
+|           |       create.blade.php
+|           |       index.blade.php
+|           |       show.blade.php
+|           |       
+|           +---conference
+|           |       index.blade.php
+|           |       
+|           +---dashboard
+|           |       index.blade.php
+|           |       
+|           +---health
+|           |       index.blade.php
+|           |       
+|           +---ivr
+|           |       builder.blade.php
+|           |       index.blade.php
+|           |       
+|           +---layouts
+|           |       app.blade.php
+|           |       
+|           +---livewire
+|           |       agent-status-grid.blade.php
+|           |       analytics-dashboard.blade.php
+|           |       blacklist-manager.blade.php
+|           |       call-log-table.blade.php
+|           |       campaign-manager.blade.php
+|           |       health-monitor.blade.php
+|           |       incoming-call-popup.blade.php
+|           |       ivr-builder.blade.php
+|           |       live-call-board.blade.php
+|           |       pending-callbacks.blade.php
+|           |       
+|           +---partials
+|           |       dialer-debug.blade.php
+|           |       
+|           \---recordings
+|                   index.blade.php
+|                   
++---routes
+|       api.php
+|       web.php
+|       webhook.php
+|       
++---src
+|   |   InstallCommand.php
+|   |   MikoPBXManager.php
+|   |   MikoPBXServiceProvider.php
+|   |   
+|   +---Commands
+|   |       AmiListenCommand.php
+|   |       CampaignRunCommand.php
+|   |       CdrSyncCommand.php
+|   |       HealthCheckCommand.php
+|   |       InstallCommand.php
+|   |       SyncExtensionsCommand.php
+|   |       
+|   +---Enums
+|   |       AgentStatus.php
+|   |       CallStatus.php
+|   |       CampaignStatus.php
+|   |       
+|   +---Events
+|   |       AgentStatusChangedEvent.php
+|   |       CallAnsweredEvent.php
+|   |       CallEndedEvent.php
+|   |       IncomingCallEvent.php
+|   |       
+|   +---Exceptions
+|   |       MikoPBXException.php
+|   |       
+|   +---Facades
+|   |       MikoPBX.php
+|   |       
+|   +---Http
+|   |   +---Controllers
+|   |   |       AgentController.php
+|   |   |       AnalyticsController.php
+|   |   |       BlacklistController.php
+|   |   |       CallbackController.php
+|   |   |       CallController.php
+|   |   |       CampaignController.php
+|   |   |       ConferenceController.php
+|   |   |       DashboardController.php
+|   |   |       HealthController.php
+|   |   |       IVRController.php
+|   |   |       RecordingController.php
+|   |   |       WebDialerController.php
+|   |   |       
+|   |   +---Middleware
+|   |   +---Requests
+|   |   \---Resources
+|   +---Jobs
+|   |       ProcessCallbackJob.php
+|   |       
+|   +---Listeners
+|   |       MissedCallListener.php
+|   |       
+|   +---Livewire
+|   |       AgentStatusGrid.php
+|   |       AnalyticsDashboard.php
+|   |       BlacklistManager.php
+|   |       CallLogTable.php
+|   |       CampaignManager.php
+|   |       HealthMonitor.php
+|   |       IncomingCallPopup.php
+|   |       IVRBuilderComponent.php
+|   |       LiveCallBoard.php
+|   |       PendingCallbacks.php
+|   |       
+|   +---Models
+|   |       Blacklist.php
+|   |       Callback.php
+|   |       CallLog.php
+|   |       Campaign.php
+|   |       CampaignNumber.php
+|   |       Extension.php
+|   |       HealthLog.php
+|   |       
+|   +---Notifications
+|   +---Services
+|   |       AgentService.php
+|   |       AMIService.php
+|   |       AnalyticsService.php
+|   |       ARIService.php
+|   |       BlacklistService.php
+|   |       CallbackService.php
+|   |       CampaignService.php
+|   |       ConferenceService.php
+|   |       HealthCheckService.php
+|   |       IVRService.php
+|   |       RecordingService.php
+|   |       RestApiService.php
+|   |       SmsService.php
+|   |       WebDialerService.php
+|   |       
+|   +---Testing
+|   |       MikoPBXFake.php
+|   |       
+|   +---Traits
+|   |       HasMikoPBXExtension.php
+|   |       
+|   \---Webhooks
+\---tests
+    |   Pest.php
+    |   TestCase.php
+    |   
+    +---Feature
+    |       MikoPBXTest.php
+    |       
+    \---Unit
+            UnitTest.php
+            
