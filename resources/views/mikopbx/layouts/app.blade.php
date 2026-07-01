@@ -234,6 +234,22 @@
                             this._reportAgentStatus('offline');
                         });
                         window._mikopbxUA.on('newRTCSession', (e) => {
+                            // ── DIAGNOSTIC LOG — always fires, regardless of originator ──
+                            // If an incoming call rings on the server (visible in the Live
+                            // Call Board) but you do NOT see this log line in the browser
+                            // console, JsSIP never received the INVITE at all. That means
+                            // the problem is on the MikoPBX side, not in this code:
+                            //   → Check MikoPBX Admin → Extensions → 121 → "Enable WebRTC"
+                            //     is turned ON for this extension.
+                            //   → Confirm this extension is not also registered as a
+                            //     separate desk phone that intercepts calls before the
+                            //     WebRTC (-WS) contact gets a chance to ring.
+                            console.log('[MikoPBX Dialer] newRTCSession fired:', {
+                                originator: e.originator,
+                                from:       e.request?.from?.uri?.user,
+                                to:         e.request?.to?.uri?.user,
+                            });
+
                             if (e.originator === 'remote') {
                                 window._mikopbxSession = e.session;
                                 const from = e.request?.from?.uri?.user ?? 'Unknown';
