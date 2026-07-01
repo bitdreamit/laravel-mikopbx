@@ -236,8 +236,14 @@
                         window._mikopbxUA.on('newRTCSession', (e) => {
                             if (e.originator === 'remote') {
                                 window._mikopbxSession = e.session;
-                                this._attachSession(e.session);
                                 const from = e.request?.from?.uri?.user ?? 'Unknown';
+
+                                // Show the popup and ring FIRST, before touching
+                                // session.connection (which does not exist yet on
+                                // a fresh inbound session — accessing it early
+                                // throws synchronously and silently skips the
+                                // rest of this handler, which is why the
+                                // Answer/Reject popup never appeared).
                                 this.dialString   = from;
                                 this.incomingFrom = from;
                                 this.callStatus   = 'ringing';
@@ -247,6 +253,8 @@
 
                                 const rt = document.getElementById('mikopbx-ringtone');
                                 if (rt) rt.play().catch(() => {});
+
+                                this._attachSession(e.session);
 
                                 // Do NOT auto-answer — wait for the user to click Answer.
                                 // If the caller hangs up before we answer, treat it like a miss.
@@ -401,14 +409,33 @@
                         setTimeout(() => this.endCall(), 2000);
                     });
 
-                    session.connection.addEventListener('track', (ev) => {
-                        console.log('[Audio] Track received:', ev.track.kind, ev.streams);
-                        const audio = document.getElementById('mikopbx-remote-audio');
-                        if (audio && ev.streams[0]) {
-                            audio.srcObject = ev.streams[0];
-                            audio.play().catch(e => console.warn('Audio play failed:', e));
-                        }
-                    });
+                    // IMPORTANT: session.connection does NOT exist yet for a
+                    // freshly-arrived inbound session (only outbound sessions
+                    // have it immediately, since .call() builds the offer
+                    // synchronously). Accessing session.connection directly
+                    // here throws and silently aborts this whole function —
+                    // which was why the incoming-call popup never appeared.
+                    // JsSIP's 'peerconnection' event fires once the
+                    // RTCPeerConnection actually exists (works for both
+                    // inbound after answer() and outbound immediately).
+                    const wireAudioTrack = (pc) => {
+                        pc.addEventListener('track', (ev) => {
+                            console.log('[Audio] Track received:', ev.track.kind, ev.streams);
+                            const audio = document.getElementById('mikopbx-remote-audio');
+                            if (audio && ev.streams[0]) {
+                                audio.srcObject = ev.streams[0];
+                                audio.play().catch(e => console.warn('Audio play failed:', e));
+                            }
+                        });
+                    };
+
+                    if (session.connection) {
+                        // Outbound call — connection already exists
+                        wireAudioTrack(session.connection);
+                    } else {
+                        // Inbound call — wait for JsSIP to create it (fires on answer())
+                        session.on('peerconnection', (e) => wireAudioTrack(e.peerconnection));
+                    }
                 },
 
                 // ── Report agent online/busy/offline status to server ────────
